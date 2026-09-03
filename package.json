@@ -1,0 +1,20 @@
+{
+  "name": "35xw-bot",
+  "version": "1.0.0",
+  "description": "35xw Discord bot: Steam/FiveM account generator (never gives the same account twice), auto-roles with memory, Rastrosan stats and a delete-all safety switch.",
+  "main": "src/index.js",
+  "private": true,
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "deploy": "node src/deploy-commands.js",
+    "test": "node --test",
+    "check": "node --check src/index.js && node --check src/deploy-commands.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.27.0",
+    "dotenv": "^17.4.2"
+  }
+}

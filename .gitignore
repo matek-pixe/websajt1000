@@ -1,0 +1,12 @@
+# dependencies
+node_modules/
+
+# secrets
+.env
+
+# runtime data (accounts, database, uploaded files)
+data/
+
+# logs and OS junk
+*.log
+.DS_Store

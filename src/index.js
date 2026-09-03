@@ -1,0 +1,176 @@
+'use strict';
+
+const path = require('node:path');
+const { Client, GatewayIntentBits, Partials, Events, MessageFlags } = require('discord.js');
+
+const config = require('./config');
+const { Storage } = require('./storage');
+const { AccountService } = require('./services/accounts');
+const { RoleMemoryService } = require('./services/roleMemory');
+const { Cooldown } = require('./services/cooldown');
+const registry = require('./commands');
+
+function fail(message) {
+  console.error(`\n[35xw] ${message}\n`);
+  process.exit(1);
+}
+
+if (!config.token) fail('DISCORD_TOKEN is missing. Copy .env.example to .env and fill it in.');
+if (!config.clientId) fail('CLIENT_ID is missing. Set it in .env.');
+
+// ---- services ----
+const storage = new Storage(path.join(config.dataDir, 'db.json'));
+const accounts = new AccountService(storage, config.dataDir);
+const roleMemory = new RoleMemoryService(storage, config.autoRole);
+const cooldown = new Cooldown(config.cooldownMs);
+setInterval(() => cooldown.sweep(), 60_000).unref();
+
+const services = { config, storage, accounts, roleMemory, cooldown };
+
+function isManager(user) {
+  return user && user.id === config.manager.id;
+}
+
+/** Build the per-interaction context passed to command handlers. */
+function contextFor(interaction) {
+  const key = `${interaction.commandName || interaction.customId}:${interaction.user.id}`;
+  return {
+    ...services,
+    isManager,
+    cooldownKey: key,
+    startCooldown: () => cooldown.hit(key),
+    refundCooldown: () => cooldown.reset(key),
+  };
+}
+
+// ---- client ----
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
+  partials: [Partials.GuildMember, Partials.User],
+});
+
+client.once(Events.ClientReady, async (c) => {
+  console.log(`[35xw] Logged in as ${c.user.tag} (${c.user.id})`);
+  console.log(`[35xw] Manager: ${config.manager.username} (${config.manager.id}) | cooldown: ${config.cooldownMs / 1000}s`);
+
+  for (const guild of c.guilds.cache.values()) {
+    try {
+      const role = await roleMemory.ensureAutoRole(guild);
+      console.log(`[35xw] ${guild.name}: auto role -> ${role ? `${role.name} (${role.id})` : 'NONE (check perms/config)'}`);
+      // Best-effort baseline: cache members and snapshot their roles so a later leave keeps the data.
+      const members = await guild.members.fetch().catch(() => null);
+      if (members) {
+        for (const member of members.values()) {
+          if (!member.user.bot) roleMemory.remember(member);
+        }
+        console.log(`[35xw] ${guild.name}: snapshotted roles for ${members.size} members`);
+      }
+    } catch (err) {
+      console.warn(`[35xw] ${guild.name}: ready sync failed: ${err.message}`);
+    }
+  }
+  console.log('[35xw] Ready.');
+});
+
+// ---- slash commands + buttons ----
+client.on(Events.InteractionCreate, async (interaction) => {
+  try {
+    if (interaction.isChatInputCommand()) {
+      await handleCommand(interaction);
+    } else if (interaction.isButton()) {
+      await handleButton(interaction);
+    }
+  } catch (err) {
+    console.error('[35xw] interaction error:', err);
+    const msg = { content: '❌ Došlo je do greške.', flags: MessageFlags.Ephemeral };
+    try {
+      if (interaction.isRepliable()) {
+        if (interaction.deferred || interaction.replied) await interaction.followUp(msg);
+        else await interaction.reply(msg);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+});
+
+async function handleCommand(interaction) {
+  const command = registry.commands.get(interaction.commandName);
+  if (!command) {
+    return interaction.reply({ content: '❓ Nepoznata komanda.', flags: MessageFlags.Ephemeral });
+  }
+
+  const ctx = contextFor(interaction);
+
+  if (!command.allowDM && !interaction.inGuild()) {
+    return interaction.reply({ content: '⚠️ Ovu komandu možeš koristiti samo na serveru.', flags: MessageFlags.Ephemeral });
+  }
+
+  if (command.managerOnly && !isManager(interaction.user)) {
+    return interaction.reply({
+      content: `⛔ Samo menadžer (**${config.manager.username}**) smije koristiti \`/${interaction.commandName}\`.`,
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  const left = cooldown.remaining(ctx.cooldownKey);
+  if (left > 0) {
+    return interaction.reply({
+      content: `⏳ Prebrzo! Pričekaj još **${Math.ceil(left / 1000)}s** prije ponovnog \`/${interaction.commandName}\`.`,
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+  // Spend the cooldown up front so a rapid double-invoke is blocked; commands refund on no-op/error.
+  cooldown.hit(ctx.cooldownKey);
+
+  try {
+    await command.execute(interaction, ctx);
+  } catch (err) {
+    ctx.refundCooldown();
+    throw err;
+  }
+}
+
+async function handleButton(interaction) {
+  const command = registry.commandForButton(interaction.customId);
+  if (!command || typeof command.handleButton !== 'function') return;
+  const ctx = contextFor(interaction);
+  await command.handleButton(interaction, ctx);
+}
+
+// ---- member events: auto role + role memory ----
+client.on(Events.GuildMemberAdd, async (member) => {
+  if (member.user.bot) return;
+  try {
+    const res = await roleMemory.applyOnJoin(member);
+    console.log(`[35xw] join: ${member.user.tag} -> applied ${res.applied.length} role(s)`);
+  } catch (err) {
+    console.warn(`[35xw] join handler failed for ${member.id}: ${err.message}`);
+  }
+});
+
+client.on(Events.GuildMemberRemove, async (member) => {
+  try {
+    // member may be partial; fetch is not possible after they left, but cached roles are enough.
+    if (member.user && member.user.bot) return;
+    if (member.roles && member.roles.cache) roleMemory.remember(member);
+  } catch (err) {
+    console.warn(`[35xw] leave handler failed for ${member.id}: ${err.message}`);
+  }
+});
+
+client.on(Events.GuildMemberUpdate, async (oldMember, newMember) => {
+  try {
+    if (newMember.user && newMember.user.bot) return;
+    const before = oldMember.roles ? [...oldMember.roles.cache.keys()].sort().join(',') : '';
+    const after = newMember.roles ? [...newMember.roles.cache.keys()].sort().join(',') : '';
+    if (before !== after) roleMemory.remember(newMember);
+  } catch (err) {
+    console.warn(`[35xw] update handler failed for ${newMember.id}: ${err.message}`);
+  }
+});
+
+client.on(Events.Error, (err) => console.error('[35xw] client error:', err));
+process.on('unhandledRejection', (err) => console.error('[35xw] unhandledRejection:', err));
+
+client.login(config.token);
