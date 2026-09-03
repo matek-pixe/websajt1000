@@ -17,7 +17,7 @@ gives everyone an **auto role** on join, **remembers each member's roles** by th
 | `/aa` | **server owner** | Sets the role every new member gets on **this** server, e.g. `/aa @Member`. Run with no role to see the current setting. |
 | `/refills` | **manager only** | Attach `steam.txt` to refill the Steam pool. |
 | `/refill5` | **manager only** | Attach `fivem.txt` to refill the FiveM pool. |
-| `/b [amount] [pool]` | **manager only** | Bypass: skips every limit (no cooldown) and hands out accounts from every pool at once (1–10 per pool). |
+| `/b [mode]` | **manager only** | Bypass switch: while on, the manager is exempt from every limit (command cooldowns, one-open-ticket rule, ticket cooldown). `/b` toggles; `mode:on/off` sets it. Persisted across restarts. |
 | `/n` | **manager only** | Deletes **all** channels one by one and leaves a single text channel named `zavrseno`. Asks for confirmation first. |
 | `/v [staff]` | **staff** | Posts the **35xw verification** panel with a 🎫 **OPEN TICKET** button. Optionally sets the staff role. |
 | `/close` | opener / staff | Closes the current ticket (renames it to `close-NNNN`). |

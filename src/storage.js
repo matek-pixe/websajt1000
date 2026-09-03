@@ -28,6 +28,8 @@ function defaults() {
     // tickets.<guildId> = { counter, categoryId, staffRoleId, transcript: { index, count },
     //   tickets: { <channelId>: {...} }, users: { <userId>: { lastClosedAt } } }
     tickets: {},
+    // settings.bypass = true while the manager's /b "no limits" mode is switched on.
+    settings: { bypass: false },
   };
 }
 
@@ -62,6 +64,8 @@ function sanitize(data) {
   if (!isPlainObject(data.roles)) data.roles = {};
   if (!isPlainObject(data.autoRoles)) data.autoRoles = {};
   if (!isPlainObject(data.tickets)) data.tickets = {};
+  if (!isPlainObject(data.settings)) data.settings = {};
+  if (typeof data.settings.bypass !== 'boolean') data.settings.bypass = false;
   return data;
 }
 

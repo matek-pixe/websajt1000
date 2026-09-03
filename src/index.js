@@ -8,6 +8,7 @@ const { Storage } = require('./storage');
 const { AccountService } = require('./services/accounts');
 const { RoleMemoryService } = require('./services/roleMemory');
 const { TicketService } = require('./services/tickets');
+const { BypassService } = require('./services/bypass');
 const { Cooldown } = require('./services/cooldown');
 const registry = require('./commands');
 
@@ -24,10 +25,11 @@ const storage = new Storage(path.join(config.dataDir, 'db.json'));
 const accounts = new AccountService(storage, config.dataDir);
 const roleMemory = new RoleMemoryService(storage, config.autoRole);
 const tickets = new TicketService(storage, config);
+const bypass = new BypassService(storage, config);
 const cooldown = new Cooldown(config.cooldownMs);
 setInterval(() => cooldown.sweep(), 60_000).unref();
 
-const services = { config, storage, accounts, roleMemory, tickets, cooldown };
+const services = { config, storage, accounts, roleMemory, tickets, bypass, cooldown };
 
 function isManager(user) {
   return user && user.id === config.manager.id;
@@ -39,6 +41,8 @@ function contextFor(interaction) {
   return {
     ...services,
     isManager,
+    /** true when this user is the manager and /b bypass is on -> no limits at all */
+    isBypass: (user) => bypass.applies(user),
     cooldownKey: key,
     startCooldown: () => cooldown.hit(key),
     refundCooldown: () => cooldown.reset(key),
@@ -152,8 +156,8 @@ async function handleCommand(interaction) {
     });
   }
 
-  // Commands flagged noCooldown (e.g. the manager's /b bypass) skip the limit entirely.
-  if (!command.noCooldown) {
+  // Commands flagged noCooldown skip the limit, and so does the manager while /b bypass is on.
+  if (!bypass.skipsCooldown(command, interaction.user)) {
     const left = cooldown.remaining(ctx.cooldownKey);
     if (left > 0) {
       return interaction.reply({

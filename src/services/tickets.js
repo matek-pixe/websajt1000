@@ -372,8 +372,10 @@ class TicketService {
   /**
    * Create a ticket for a member. Returns { ok, reason?, channel?, number? }.
    * reason: 'already_open' | 'cooldown' | 'in_progress'
+   * With { bypass: true } (the manager's /b mode) the one-open-ticket rule and the cooldown are
+   * skipped; only the double-click guard remains.
    */
-  async createTicket(guild, member) {
+  async createTicket(guild, member, { bypass = false } = {}) {
     const b = this._guild(guild.id);
 
     // Self-heal: if the "open" ticket's channel no longer exists, forget it.
@@ -383,8 +385,10 @@ class TicketService {
       }
     }
 
-    const elig = evaluateOpen(b, member.id, Date.now(), this.opts.reopenCooldownMs);
-    if (!elig.ok) return elig;
+    if (!bypass) {
+      const elig = evaluateOpen(b, member.id, Date.now(), this.opts.reopenCooldownMs);
+      if (!elig.ok) return elig;
+    }
     if (this.creating.has(member.id)) return { ok: false, reason: 'in_progress' };
 
     this.creating.add(member.id);

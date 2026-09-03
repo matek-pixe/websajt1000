@@ -24,7 +24,7 @@ async function openTicketFlow(interaction, ctx) {
   const member = interaction.member;
   let res;
   try {
-    res = await ctx.tickets.createTicket(interaction.guild, member);
+    res = await ctx.tickets.createTicket(interaction.guild, member, { bypass: ctx.isBypass(interaction.user) });
   } catch (err) {
     console.error('[35xw] ticket create failed:', err);
     return say(

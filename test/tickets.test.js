@@ -188,6 +188,42 @@ test('every server numbers its own tickets independently (each starts at ticket-
   }
 });
 
+test('bypass lets the manager ignore the one-open-ticket rule and the cooldown', async () => {
+  const dir = tmpDir();
+  try {
+    const svc = new TicketService(new Storage(path.join(dir, 'db.json')), CFG);
+    const store = new Map();
+    let n = 1;
+    const g = {
+      id: 'G',
+      roles: { cache: new Map() },
+      members: { me: { id: 'BOT' }, cache: new Map() },
+      channels: {
+        cache: { get: (x) => store.get(x), has: (x) => store.has(x), find: (fn) => [...store.values()].find(fn) },
+        create: async (o) => {
+          const ch = { id: `C${n++}`, name: o.name, type: o.type, parentId: o.parent || null, guild: g, send: async () => ({}) };
+          store.set(ch.id, ch);
+          return ch;
+        },
+      },
+    };
+    const mgr = { id: 'MGR', user: { tag: 'MGR', username: 'MGR' } };
+
+    // without bypass: second ticket is refused
+    assert.equal((await svc.createTicket(g, mgr)).ok, true);
+    assert.equal((await svc.createTicket(g, mgr)).reason, 'already_open');
+
+    // with bypass: unlimited open tickets, and the cooldown is ignored too
+    assert.equal((await svc.createTicket(g, mgr, { bypass: true })).ok, true);
+    assert.equal((await svc.createTicket(g, mgr, { bypass: true })).ok, true);
+    svc._guild('G').users.MGR = { lastClosedAt: Date.now() }; // fresh close -> cooldown active
+    assert.equal((await svc.createTicket(g, mgr, { bypass: true })).ok, true);
+    assert.equal(svc._guild('G').counter, 4);
+  } finally {
+    rm(dir);
+  }
+});
+
 test('service: isStaff recognises manager, admins and the staff role', () => {
   const dir = tmpDir();
   try {

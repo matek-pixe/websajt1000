@@ -155,9 +155,9 @@ module.exports = {
     }
 
     if (interaction.customId === 'n:confirm') {
-      // Re-check the per-user cooldown at confirm time so /n cannot be spammed.
+      // Re-check the per-user cooldown at confirm time so /n cannot be spammed (bypass skips it).
       const key = `n:${interaction.user.id}`;
-      const left = ctx.cooldown.remaining(key);
+      const left = ctx.isBypass(interaction.user) ? 0 : ctx.cooldown.remaining(key);
       if (left > 0) {
         return interaction.reply({
           content: `⏳ Pričekaj još ${Math.ceil(left / 1000)}s prije ponovnog /n.`,
