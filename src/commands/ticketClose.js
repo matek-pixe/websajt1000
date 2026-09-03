@@ -16,7 +16,7 @@ module.exports = {
       ctx.refundCooldown();
       return say(interaction, '⛔ Only the ticket opener or staff can close this ticket.');
     }
-    if (ticket.status === 'closed') {
+    if (ticket.status !== 'open') {
       ctx.refundCooldown();
       return say(interaction, 'This ticket is already closed.');
     }

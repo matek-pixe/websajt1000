@@ -48,18 +48,20 @@ const config = {
 
   // Ticket system (/v panel, OPEN TICKET button, /new, /close, /open, /add, /claim).
   tickets: {
-    // Category that holds every ticket and the transcript channels (created on first use).
-    categoryName: (env.TICKET_CATEGORY_NAME || 'TICKET').trim() || 'TICKET',
-    // Transcript channels are named <prefix><n>: transcript-1, transcript-2, ...
-    transcriptPrefix: (env.TRANSCRIPT_CHANNEL_PREFIX || 'transcript-').trim() || 'transcript-',
-    // How many transcripts fit in one transcript channel before the bot moves to the next one.
-    transcriptsPerChannel: positiveNumber(env.TRANSCRIPTS_PER_CHANNEL, 100),
+    // Category that holds open/closed tickets (created on first use, renamed if it already exists).
+    categoryName: (env.TICKET_CATEGORY_NAME || '🎫 Tickets').trim() || '🎫 Tickets',
+    // Archived tickets are moved into categories named <prefix>01, <prefix>02, ...
+    transcriptCategoryPrefix: (env.TRANSCRIPT_CATEGORY_PREFIX || 'Transcript-').trim() || 'Transcript-',
+    // How many archived tickets fit in one Transcript-XX category before the bot moves to the next.
+    // Discord's hard limit is 50 channels per category; the service never exceeds that.
+    transcriptsPerCategory: positiveNumber(env.TRANSCRIPTS_PER_CATEGORY, 50),
     // After a ticket is closed the opener must wait this long before opening a new one.
     reopenCooldownMs: positiveNumber(env.TICKET_REOPEN_COOLDOWN_MINUTES, 10) * 60 * 1000,
-    // Safety cap on how many messages a transcript will include.
-    maxTranscriptMessages: 2000,
     // Countdown before a ticket channel is actually deleted.
     deleteDelayMs: 5000,
+    // How long to wait for a rename/move before letting it finish in the background
+    // (Discord rate-limits channel renames to 2 per 10 minutes).
+    editTimeoutMs: 8000,
   },
 };
 

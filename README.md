@@ -19,11 +19,9 @@ gives everyone an **auto role** on join, **remembers each member's roles** by th
 | `/refill5` | **manager only** | Attach `fivem.txt` to refill the FiveM pool. |
 | `/n` | **manager only** | Deletes **all** channels one by one and leaves a single text channel named `zavrseno`. Asks for confirmation first. |
 | `/v [staff]` | **staff** | Posts the **35xw verification** panel with a 🎫 **OPEN TICKET** button. Optionally sets the staff role. |
-| `/new` | everyone | Opens a ticket (same as the button). |
-| `/close` | opener / staff | Closes the current ticket. |
-| `/open` | **staff** | Reopens a closed ticket. |
+| `/close` | opener / staff | Closes the current ticket (renames it to `close-NNNN`). |
+| `/open` | **staff** | Reopens a closed or archived ticket. |
 | `/add` | **staff** | Adds a user or role to the current ticket. |
-| `/claim` | **staff** | Claims / unclaims the current ticket. |
 | `/ping` | everyone | Bot latency. |
 
 - Every command has a **30‑second cooldown per user** (configurable via `COOLDOWN_SECONDS`).
@@ -69,21 +67,27 @@ Run `/v` in a channel to post the verification panel: a clean embed titled **35x
 `/v staff:@Role` to choose the staff role that can see and manage every ticket (admins and the bot
 manager always can).
 
-- Pressing the button (or `/new`) creates `ticket-0001`, `ticket-0002`, … inside a **TICKET**
-  category that the bot creates on first use. Numbers are stored and **never reused**.
+- Pressing the button creates `ticket-0001`, `ticket-0002`, … inside a **🎫 Tickets** category that
+  the bot creates on first use (an older `TICKET` category is renamed, not duplicated). Numbers are
+  stored and **never reused**.
 - A user can have **one open ticket at a time**, and must wait **10 minutes** after their ticket is
   closed before opening another (`TICKET_REOPEN_COOLDOWN_MINUTES`).
 - The ticket greets the opener with *"Please wait for your role, our moderators will be here
   shortly."* and a 🔒 **Close** button.
-- **Close** (opener or staff) posts *Ticket closed by @user*, **removes the opener's access** to the
-  channel, and shows the staff controls: 📄 **Transcript**, 🔓 **Open**, ⛔ **Delete**.
-- **Transcript** saves the whole conversation as a `.txt` file into `transcript-1`. When that channel
-  has held `TRANSCRIPTS_PER_CHANNEL` transcripts (default 100) the bot moves on to `transcript-2`
-  and remembers it, so a full channel is never checked again.
-- **Open** restores the opener's access; **Delete** removes the channel after a short countdown.
-- `/add`, `/claim` help staff manage a ticket; `/close` and `/open` mirror the buttons.
+- **Close** (opener or staff) renames the channel to **`close-NNNN`**, posts *Ticket closed by
+  @user*, **removes the opener's access**, and shows the staff controls: 📄 **Transcript**,
+  🔓 **Open**, ⛔ **Delete**.
+- **Transcript** moves the closed channel into the **Transcript-01** category and renames it to
+  **`transcript-NNNN`**; the channel itself is the transcript. Discord allows 50 channels per
+  category, so when Transcript-01 is full (or a move fails) the bot creates **Transcript-02** and
+  remembers it, never re-checking a full category (`TRANSCRIPTS_PER_CATEGORY`, max 50).
+- **Open** brings a closed or archived ticket back to 🎫 Tickets as `ticket-NNNN` and restores the
+  opener's access; **Delete** removes the channel after a short countdown.
+- `/add` gives someone access to a ticket; `/close` and `/open` mirror the buttons.
 
-All ticket state lives in the database, so numbering, cooldowns and transcript slots survive restarts.
+A ticket keeps **one number for its whole life** (`ticket-0007` → `close-0007` → `transcript-0007`),
+so tickets and transcripts can never get mixed up. All ticket state lives in the database, so
+numbering, cooldowns and the current Transcript-XX slot survive restarts.
 
 ---
 

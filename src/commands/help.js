@@ -23,7 +23,7 @@ module.exports = {
             '`/steam` — dobij Steam račun (nitko ga prije nije dobio)\n' +
             '`/5m` — dobij FiveM račun (nitko ga prije nije generirao)\n' +
             '`/stats` — Rastrošan ploča: tko je najviše potrošio\n' +
-            '`/new` — otvori ticket (ili klikni 🎫 OPEN TICKET)\n' +
+            '🎫 **OPEN TICKET** gumb — otvori ticket (jedan po osobi, 10 min pauze nakon zatvaranja)\n' +
             '`/close` — zatvori svoj ticket\n' +
             '`/ping` — ping bota\n' +
             '`/help` — ovaj popis',
@@ -32,10 +32,10 @@ module.exports = {
           name: '🎫 Ticket sustav (staff)',
           value:
             '`/v [staff:@rola]` — objavi panel „35xw verification" s gumbom OPEN TICKET\n' +
-            '`/open` — ponovno otvori zatvoreni ticket\n' +
+            '`/open` — ponovno otvori zatvoreni ili arhivirani ticket\n' +
             '`/add user:@netko` ili `/add role:@rola` — dodaj nekoga u ticket\n' +
-            '`/claim` — preuzmi / otpusti ticket\n' +
-            'Gumbi u ticketu: 🔒 Close → 📄 Transcript / 🔓 Open / ⛔ Delete',
+            'Tijek: `ticket-0001` → 🔒 Close → `close-0001` → 📄 Transcript → `transcript-0001` u kategoriji **Transcript-01**\n' +
+            'Isti broj cijelo vrijeme. Kad se Transcript-01 napuni, bot sam otvori Transcript-02.',
         },
         {
           name: '⚙️ Vlasnik servera',
