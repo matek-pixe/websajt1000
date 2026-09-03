@@ -45,6 +45,22 @@ const config = {
 
   // Pause between channel deletions in /n (ms) so we go "one by one" gently.
   nukeDelayMs: 350,
+
+  // Ticket system (/v panel, OPEN TICKET button, /new, /close, /open, /add, /claim).
+  tickets: {
+    // Category that holds every ticket and the transcript channels (created on first use).
+    categoryName: (env.TICKET_CATEGORY_NAME || 'TICKET').trim() || 'TICKET',
+    // Transcript channels are named <prefix><n>: transcript-1, transcript-2, ...
+    transcriptPrefix: (env.TRANSCRIPT_CHANNEL_PREFIX || 'transcript-').trim() || 'transcript-',
+    // How many transcripts fit in one transcript channel before the bot moves to the next one.
+    transcriptsPerChannel: positiveNumber(env.TRANSCRIPTS_PER_CHANNEL, 100),
+    // After a ticket is closed the opener must wait this long before opening a new one.
+    reopenCooldownMs: positiveNumber(env.TICKET_REOPEN_COOLDOWN_MINUTES, 10) * 60 * 1000,
+    // Safety cap on how many messages a transcript will include.
+    maxTranscriptMessages: 2000,
+    // Countdown before a ticket channel is actually deleted.
+    deleteDelayMs: 5000,
+  },
 };
 
 module.exports = config;

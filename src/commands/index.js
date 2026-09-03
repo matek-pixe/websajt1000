@@ -11,6 +11,14 @@ const modules = [
   require('./stats'),
   require('./autorole'),
   require('./help'),
+  // ticket system
+  require('./verify'),
+  require('./ticketNew'),
+  require('./ticketClose'),
+  require('./ticketOpen'),
+  require('./ticketAdd'),
+  require('./ticketClaim'),
+  require('./ping'),
 ];
 
 /** name -> command module */

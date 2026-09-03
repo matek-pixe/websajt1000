@@ -7,6 +7,7 @@ const config = require('./config');
 const { Storage } = require('./storage');
 const { AccountService } = require('./services/accounts');
 const { RoleMemoryService } = require('./services/roleMemory');
+const { TicketService } = require('./services/tickets');
 const { Cooldown } = require('./services/cooldown');
 const registry = require('./commands');
 
@@ -22,10 +23,11 @@ if (!config.clientId) fail('CLIENT_ID is missing. Set it in .env.');
 const storage = new Storage(path.join(config.dataDir, 'db.json'));
 const accounts = new AccountService(storage, config.dataDir);
 const roleMemory = new RoleMemoryService(storage, config.autoRole);
+const tickets = new TicketService(storage, config);
 const cooldown = new Cooldown(config.cooldownMs);
 setInterval(() => cooldown.sweep(), 60_000).unref();
 
-const services = { config, storage, accounts, roleMemory, cooldown };
+const services = { config, storage, accounts, roleMemory, tickets, cooldown };
 
 function isManager(user) {
   return user && user.id === config.manager.id;
@@ -218,6 +220,17 @@ client.on(Events.GuildMemberUpdate, async (oldMember, newMember) => {
     if (before !== after) roleMemory.remember(newMember);
   } catch (err) {
     console.warn(`[35xw] update handler failed for ${newMember.id}: ${err.message}`);
+  }
+});
+
+// If a ticket channel is deleted by hand, drop its record so the opener can open a new one.
+client.on(Events.ChannelDelete, (channel) => {
+  try {
+    if (channel.guild && tickets.forgetChannel(channel.guild.id, channel.id)) {
+      console.log(`[35xw] ticket channel ${channel.name} was deleted; record cleared.`);
+    }
+  } catch (err) {
+    console.warn(`[35xw] channelDelete handler failed: ${err.message}`);
   }
 });
 

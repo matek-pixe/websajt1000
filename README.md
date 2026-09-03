@@ -18,6 +18,13 @@ gives everyone an **auto role** on join, **remembers each member's roles** by th
 | `/refills` | **manager only** | Attach `steam.txt` to refill the Steam pool. |
 | `/refill5` | **manager only** | Attach `fivem.txt` to refill the FiveM pool. |
 | `/n` | **manager only** | Deletes **all** channels one by one and leaves a single text channel named `zavrseno`. Asks for confirmation first. |
+| `/v [staff]` | **staff** | Posts the **35xw verification** panel with a 🎫 **OPEN TICKET** button. Optionally sets the staff role. |
+| `/new` | everyone | Opens a ticket (same as the button). |
+| `/close` | opener / staff | Closes the current ticket. |
+| `/open` | **staff** | Reopens a closed ticket. |
+| `/add` | **staff** | Adds a user or role to the current ticket. |
+| `/claim` | **staff** | Claims / unclaims the current ticket. |
+| `/ping` | everyone | Bot latency. |
 
 - Every command has a **30‑second cooldown per user** (configurable via `COOLDOWN_SECONDS`).
 - Account replies are **ephemeral** – only the person who ran the command can see the account.
@@ -55,6 +62,29 @@ to assign it; `/aa` warns you if it doesn't.
 > community-updates channels, so on a Community server those remain alongside `zavrseno`. On a normal
 > server `/n` really does leave exactly one channel.
 
+### Ticket system
+
+Run `/v` in a channel to post the verification panel: a clean embed titled **35xw verification**
+("To get access to the server open a ticket") with a 🎫 **OPEN TICKET** button. Pass
+`/v staff:@Role` to choose the staff role that can see and manage every ticket (admins and the bot
+manager always can).
+
+- Pressing the button (or `/new`) creates `ticket-0001`, `ticket-0002`, … inside a **TICKET**
+  category that the bot creates on first use. Numbers are stored and **never reused**.
+- A user can have **one open ticket at a time**, and must wait **10 minutes** after their ticket is
+  closed before opening another (`TICKET_REOPEN_COOLDOWN_MINUTES`).
+- The ticket greets the opener with *"Please wait for your role, our moderators will be here
+  shortly."* and a 🔒 **Close** button.
+- **Close** (opener or staff) posts *Ticket closed by @user*, **removes the opener's access** to the
+  channel, and shows the staff controls: 📄 **Transcript**, 🔓 **Open**, ⛔ **Delete**.
+- **Transcript** saves the whole conversation as a `.txt` file into `transcript-1`. When that channel
+  has held `TRANSCRIPTS_PER_CHANNEL` transcripts (default 100) the bot moves on to `transcript-2`
+  and remembers it, so a full channel is never checked again.
+- **Open** restores the opener's access; **Delete** removes the channel after a short countdown.
+- `/add`, `/claim` help staff manage a ticket; `/close` and `/open` mirror the buttons.
+
+All ticket state lives in the database, so numbering, cooldowns and transcript slots survive restarts.
+
 ---
 
 ## Setup
@@ -70,10 +100,12 @@ to assign it; `/aa` warns you if it doesn't.
 ### 2. Invite the bot
 
 Use an invite URL with the `bot` and `applications.commands` scopes and these permissions:
-**Manage Roles**, **Manage Channels**, **Send Messages**, **View Channels**.
+**Manage Roles**, **Manage Channels**, **Manage Messages**, **View Channels**, **Send Messages**,
+**Embed Links**, **Attach Files**, **Read Message History** (the last four are needed for embeds and
+ticket transcripts).
 
 ```
-https://discord.com/api/oauth2/authorize?client_id=YOUR_CLIENT_ID&scope=bot%20applications.commands&permissions=268438544
+https://discord.com/api/oauth2/authorize?client_id=YOUR_CLIENT_ID&scope=bot%20applications.commands&permissions=268561424
 ```
 
 > Make sure the bot's role is **above** the auto role and any roles it should manage, and that it

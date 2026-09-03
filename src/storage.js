@@ -25,6 +25,9 @@ function defaults() {
     // autoRoles.<guildId> = { roleId, setBy, username, at } -> the role new members get,
     //   chosen by the server owner with /aa. Overrides the AUTO_ROLE_* env defaults.
     autoRoles: {},
+    // tickets.<guildId> = { counter, categoryId, staffRoleId, transcript: { index, count },
+    //   tickets: { <channelId>: {...} }, users: { <userId>: { lastClosedAt } } }
+    tickets: {},
   };
 }
 
@@ -58,6 +61,7 @@ function sanitize(data) {
   }
   if (!isPlainObject(data.roles)) data.roles = {};
   if (!isPlainObject(data.autoRoles)) data.autoRoles = {};
+  if (!isPlainObject(data.tickets)) data.tickets = {};
   return data;
 }
 
