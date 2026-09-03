@@ -216,55 +216,67 @@ class TicketService {
     return cat;
   }
 
+  /**
+   * Discord only lets a bot grant permissions it actually holds in the guild; asking for more
+   * fails the whole channel create/edit with "Missing Permissions". So every allow list is
+   * filtered down to what the bot currently has (falls back to "all" if we cannot tell).
+   */
+  _held(guild, flags) {
+    const me = guild.members.me;
+    const perms = me && me.permissions && typeof me.permissions.has === 'function' ? me.permissions : null;
+    if (!perms) return flags;
+    return flags.filter((f) => perms.has(f));
+  }
+
+  /** Same idea for the { ViewChannel: true, ... } object form used by permissionOverwrites.edit(). */
+  _heldObject(guild, obj) {
+    const me = guild.members.me;
+    const perms = me && me.permissions && typeof me.permissions.has === 'function' ? me.permissions : null;
+    if (!perms) return obj;
+    const out = {};
+    for (const [key, value] of Object.entries(obj)) {
+      const bit = PermissionFlagsBits[key];
+      if (bit === undefined || perms.has(bit)) out[key] = value;
+    }
+    return out;
+  }
+
+  /** Permissions a ticket participant (opener / added user / staff) gets in the channel. */
+  static PARTICIPANT_FLAGS = [
+    PermissionFlagsBits.ViewChannel,
+    PermissionFlagsBits.SendMessages,
+    PermissionFlagsBits.ReadMessageHistory,
+    PermissionFlagsBits.AttachFiles,
+    PermissionFlagsBits.EmbedLinks,
+  ];
+
   /** Overwrites shared by ticket and transcript channels: private, bot + staff can see. */
   _baseOverwrites(guild) {
     const b = this._guild(guild.id);
     const me = guild.members.me;
     const out = [{ id: guild.id, deny: [PermissionFlagsBits.ViewChannel] }];
     if (me) {
-      out.push({
-        id: me.id,
-        allow: [
-          PermissionFlagsBits.ViewChannel,
-          PermissionFlagsBits.SendMessages,
-          PermissionFlagsBits.ReadMessageHistory,
-          PermissionFlagsBits.ManageChannels,
-          PermissionFlagsBits.ManageMessages,
-          PermissionFlagsBits.AttachFiles,
-          PermissionFlagsBits.EmbedLinks,
-        ],
-      });
+      // The bot only needs to see and talk in the channel; deleting it uses guild-level Manage Channels.
+      out.push({ id: me.id, allow: this._held(guild, TicketService.PARTICIPANT_FLAGS) });
     }
     if (b.staffRoleId && guild.roles.cache.has(b.staffRoleId)) {
-      out.push({
-        id: b.staffRoleId,
-        allow: [
-          PermissionFlagsBits.ViewChannel,
-          PermissionFlagsBits.SendMessages,
-          PermissionFlagsBits.ReadMessageHistory,
-          PermissionFlagsBits.AttachFiles,
-          PermissionFlagsBits.EmbedLinks,
-        ],
-      });
+      out.push({ id: b.staffRoleId, allow: this._held(guild, TicketService.PARTICIPANT_FLAGS) });
     }
     const managerId = this.config.manager.id;
     if (managerId && guild.members.cache.has(managerId)) {
-      out.push({
-        id: managerId,
-        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
-      });
+      out.push({ id: managerId, allow: this._held(guild, TicketService.PARTICIPANT_FLAGS) });
     }
     return out;
   }
 
-  static _memberAllow() {
-    return {
+  _memberAllow(guild) {
+    return this._heldObject(guild, {
       ViewChannel: true,
       SendMessages: true,
       ReadMessageHistory: true,
       AttachFiles: true,
       EmbedLinks: true,
-    };
+    });
   }
 
   // ---- open ----
@@ -298,16 +310,7 @@ class TicketService {
       this.storage.save();
 
       const overwrites = this._baseOverwrites(guild);
-      overwrites.push({
-        id: member.id,
-        allow: [
-          PermissionFlagsBits.ViewChannel,
-          PermissionFlagsBits.SendMessages,
-          PermissionFlagsBits.ReadMessageHistory,
-          PermissionFlagsBits.AttachFiles,
-          PermissionFlagsBits.EmbedLinks,
-        ],
-      });
+      overwrites.push({ id: member.id, allow: this._held(guild, TicketService.PARTICIPANT_FLAGS) });
 
       const channel = await guild.channels.create({
         name,
@@ -369,7 +372,7 @@ class TicketService {
     if (!t) return { ok: false, reason: 'not_ticket' };
     if (t.status === 'open') return { ok: false, reason: 'already_open' };
 
-    await channel.permissionOverwrites.edit(t.userId, TicketService._memberAllow(), { reason: 'Ticket reopened' });
+    await channel.permissionOverwrites.edit(t.userId, this._memberAllow(channel.guild), { reason: 'Ticket reopened' });
     t.status = 'open';
     t.closedAt = null;
     t.closedBy = null;
@@ -413,7 +416,7 @@ class TicketService {
   async addToTicket(channel, target) {
     const t = this.get(channel.guild.id, channel.id);
     if (!t) return { ok: false, reason: 'not_ticket' };
-    await channel.permissionOverwrites.edit(target.id, TicketService._memberAllow(), { reason: 'Added to ticket' });
+    await channel.permissionOverwrites.edit(target.id, this._memberAllow(channel.guild), { reason: 'Added to ticket' });
     return { ok: true };
   }
 
