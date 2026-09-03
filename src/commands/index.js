@@ -10,6 +10,7 @@ const modules = [
   require('./nuke'),
   require('./stats'),
   require('./autorole'),
+  require('./help'),
 ];
 
 /** name -> command module */

@@ -43,6 +43,37 @@ function contextFor(interaction) {
   };
 }
 
+/**
+ * Register slash commands.
+ *  - GUILD_ID set  -> register to that one guild (instant), for single-server / dev use.
+ *  - GUILD_ID empty -> register to EVERY guild the bot is in (instant on each), and clear the global
+ *    set so commands are never duplicated. New guilds are handled by the GuildCreate listener.
+ * Guild-scoped commands show up immediately, unlike global ones which can take up to an hour.
+ */
+async function registerCommands(c) {
+  const body = registry.toJSON();
+  try {
+    if (config.guildId) {
+      await c.application.commands.set(body, config.guildId);
+      console.log(`[35xw] Registered ${body.length} commands to guild ${config.guildId}.`);
+      return;
+    }
+    await c.application.commands.set([]).catch(() => {}); // avoid global+guild duplicates
+    let ok = 0;
+    for (const guild of c.guilds.cache.values()) {
+      try {
+        await guild.commands.set(body);
+        ok += 1;
+      } catch (err) {
+        console.warn(`[35xw] Command registration in ${guild.name} (${guild.id}) failed: ${err.message}`);
+      }
+    }
+    console.log(`[35xw] Registered ${body.length} commands in ${ok}/${c.guilds.cache.size} guild(s) (instant).`);
+  } catch (err) {
+    console.warn(`[35xw] Command registration failed (run "npm run deploy" manually): ${err.message}`);
+  }
+}
+
 // ---- client ----
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildModeration],
@@ -53,20 +84,8 @@ client.once(Events.ClientReady, async (c) => {
   console.log(`[35xw] Logged in as ${c.user.tag} (${c.user.id})`);
   console.log(`[35xw] Manager: ${config.manager.username} (${config.manager.id}) | cooldown: ${config.cooldownMs / 1000}s`);
 
-  // Register the slash commands automatically on startup so a separate `npm run deploy` is optional
-  // (handy on hosts that only run the start command). Bulk-overwrite is idempotent.
-  try {
-    const body = registry.toJSON();
-    if (config.guildId) {
-      await c.application.commands.set(body, config.guildId);
-      console.log(`[35xw] Registered ${body.length} commands to guild ${config.guildId}.`);
-    } else {
-      await c.application.commands.set(body);
-      console.log(`[35xw] Registered ${body.length} global commands (can take up to ~1h to appear the first time).`);
-    }
-  } catch (err) {
-    console.warn(`[35xw] Command registration failed (run "npm run deploy" manually): ${err.message}`);
-  }
+  // Register the slash commands automatically on startup so a separate `npm run deploy` is optional.
+  await registerCommands(c);
 
   for (const guild of c.guilds.cache.values()) {
     try {
@@ -155,6 +174,20 @@ async function handleButton(interaction) {
   const ctx = contextFor(interaction);
   await command.handleButton(interaction, ctx);
 }
+
+// When the bot joins a new server, register its commands there immediately (all-servers mode) and
+// make sure the auto role exists.
+client.on(Events.GuildCreate, async (guild) => {
+  try {
+    if (!config.guildId) {
+      await guild.commands.set(registry.toJSON());
+      console.log(`[35xw] Joined ${guild.name} (${guild.id}); registered commands.`);
+    }
+    await roleMemory.ensureAutoRole(guild);
+  } catch (err) {
+    console.warn(`[35xw] GuildCreate handler failed for ${guild.id}: ${err.message}`);
+  }
+});
 
 // ---- member events: auto role + role memory ----
 client.on(Events.GuildMemberAdd, async (member) => {

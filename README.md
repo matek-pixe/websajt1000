@@ -12,6 +12,7 @@ gives everyone an **auto role** on join, **remembers each member's roles** by th
 | --- | --- | --- |
 | `/steam` | everyone | Gives you one Steam account that has **never** been given to anyone on the server. |
 | `/5m` | everyone | Gives you one FiveM account that **no one** has ever generated. |
+| `/help` | everyone | Lists every command and how to use it. |
 | `/stats` | everyone | Posts the **Rastrošan** embed: member count + top `/steam` and top `/5m` users (separately). |
 | `/aa` | **server owner** | Sets the role every new member gets on **this** server, e.g. `/aa @Member`. Run with no role to see the current setting. |
 | `/refills` | **manager only** | Attach `steam.txt` to refill the Steam pool. |
@@ -102,6 +103,8 @@ all-servers mode, leave `AUTO_ROLE_ID` empty and let each server's owner pick th
 (or rely on the `AUTO_ROLE_NAME` default per server).
 
 The bot also **registers its commands automatically on startup**, so `npm run deploy` is optional.
+In all-servers mode it registers them **per guild**, so commands appear instantly on every server the
+bot is in (and on any new server it joins) instead of waiting for global propagation.
 
 ### Hosting (e.g. bot-hosting.net)
 
