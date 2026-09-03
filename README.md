@@ -17,6 +17,7 @@ gives everyone an **auto role** on join, **remembers each member's roles** by th
 | `/aa` | **server owner** | Sets the role every new member gets on **this** server, e.g. `/aa @Member`. Run with no role to see the current setting. |
 | `/refills` | **manager only** | Attach `steam.txt` to refill the Steam pool. |
 | `/refill5` | **manager only** | Attach `fivem.txt` to refill the FiveM pool. |
+| `/b [amount] [pool]` | **manager only** | Bypass: skips every limit (no cooldown) and hands out accounts from every pool at once (1–10 per pool). |
 | `/n` | **manager only** | Deletes **all** channels one by one and leaves a single text channel named `zavrseno`. Asks for confirmation first. |
 | `/v [staff]` | **staff** | Posts the **35xw verification** panel with a 🎫 **OPEN TICKET** button. Optionally sets the staff role. |
 | `/close` | opener / staff | Closes the current ticket (renames it to `close-NNNN`). |
@@ -88,6 +89,11 @@ manager always can).
 A ticket keeps **one number for its whole life** (`ticket-0007` → `close-0007` → `transcript-0007`),
 so tickets and transcripts can never get mixed up. All ticket state lives in the database, so
 numbering, cooldowns and the current Transcript-XX slot survive restarts.
+
+**Every server is independent.** Ticket numbers, categories, the Transcript-XX slot, cooldowns and the
+staff role are all stored per server, so each server starts at `ticket-0001` and never interferes
+with another. (Only the Steam/FiveM account pools are shared, on purpose, so the same account can
+never be handed out twice anywhere.)
 
 ---
 

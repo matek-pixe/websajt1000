@@ -152,15 +152,18 @@ async function handleCommand(interaction) {
     });
   }
 
-  const left = cooldown.remaining(ctx.cooldownKey);
-  if (left > 0) {
-    return interaction.reply({
-      content: `⏳ Prebrzo! Pričekaj još **${Math.ceil(left / 1000)}s** prije ponovnog \`/${interaction.commandName}\`.`,
-      flags: MessageFlags.Ephemeral,
-    });
+  // Commands flagged noCooldown (e.g. the manager's /b bypass) skip the limit entirely.
+  if (!command.noCooldown) {
+    const left = cooldown.remaining(ctx.cooldownKey);
+    if (left > 0) {
+      return interaction.reply({
+        content: `⏳ Prebrzo! Pričekaj još **${Math.ceil(left / 1000)}s** prije ponovnog \`/${interaction.commandName}\`.`,
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+    // Spend the cooldown up front so a rapid double-invoke is blocked; commands refund on no-op/error.
+    cooldown.hit(ctx.cooldownKey);
   }
-  // Spend the cooldown up front so a rapid double-invoke is blocked; commands refund on no-op/error.
-  cooldown.hit(ctx.cooldownKey);
 
   try {
     await command.execute(interaction, ctx);

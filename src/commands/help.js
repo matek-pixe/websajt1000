@@ -48,6 +48,7 @@ module.exports = {
           value:
             '`/refills` + priloži `steam.txt` — napuni Steam zalihu\n' +
             '`/refill5` + priloži `fivem.txt` — napuni FiveM zalihu\n' +
+            '`/b [amount] [pool]` — bypass: bez ikakvog limita, odjednom računi iz svih zaliha\n' +
             '`/n` — obriši SVE kanale i ostavi samo „zavrseno" (traži potvrdu)',
         },
         {

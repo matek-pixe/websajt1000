@@ -142,6 +142,52 @@ test('service: forgetChannel clears a record and starts the cooldown if it was o
   }
 });
 
+test('every server numbers its own tickets independently (each starts at ticket-0001)', async () => {
+  const dir = tmpDir();
+  try {
+    const svc = new TicketService(new Storage(path.join(dir, 'db.json')), CFG);
+    const mkGuild = (id) => {
+      const store = new Map();
+      let n = 1;
+      const g = {
+        id,
+        roles: { cache: new Map() },
+        members: { me: { id: 'BOT' }, cache: new Map() },
+        channels: {
+          cache: { get: (x) => store.get(x), has: (x) => store.has(x), find: (fn) => [...store.values()].find(fn) },
+          create: async (o) => {
+            const ch = { id: `${id}-${n++}`, name: o.name, type: o.type, parentId: o.parent || null, guild: g, send: async () => ({}) };
+            store.set(ch.id, ch);
+            return ch;
+          },
+        },
+      };
+      return g;
+    };
+    const A = mkGuild('A');
+    const B = mkGuild('B');
+    const m = (id) => ({ id, user: { tag: id, username: id } });
+
+    const a1 = await svc.createTicket(A, m('U1'));
+    const a2 = await svc.createTicket(A, m('U2'));
+    const b1 = await svc.createTicket(B, m('U1')); // same person on another server: own numbering
+
+    assert.equal(a1.channel.name, 'ticket-0001');
+    assert.equal(a2.channel.name, 'ticket-0002');
+    assert.equal(b1.channel.name, 'ticket-0001');
+    assert.equal(svc._guild('A').counter, 2);
+    assert.equal(svc._guild('B').counter, 1);
+
+    // transcript slots and staff roles are per server as well
+    svc._guild('A').transcript.index = 5;
+    svc.setStaffRole('A', 'STAFF-A');
+    assert.equal(svc._guild('B').transcript.index, 1);
+    assert.equal(svc.getStaffRole('B'), null);
+  } finally {
+    rm(dir);
+  }
+});
+
 test('service: isStaff recognises manager, admins and the staff role', () => {
   const dir = tmpDir();
   try {

@@ -7,6 +7,7 @@ const modules = [
   require('./fivem'),
   require('./refills'),
   require('./refill5'),
+  require('./bypass'),
   require('./nuke'),
   require('./stats'),
   require('./autorole'),
