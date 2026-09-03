@@ -21,7 +21,7 @@ gives everyone an **auto role** on join, **remembers each member's roles** by th
 | `/n` | **manager only** | Deletes **all** channels one by one and leaves a single text channel named `zavrseno`. Asks for confirmation first. |
 | `/v [staff]` | **staff** | Posts the **35xw verification** panel with a 🎫 **OPEN TICKET** button. Optionally sets the staff role. |
 | `/close` | opener / staff | Closes the current ticket (renames it to `close-NNNN`). |
-| `/open` | **staff** | Reopens a closed or archived ticket. |
+| `/open` | **staff** | Reopens a closed ticket. |
 | `/add` | **staff** | Adds a user or role to the current ticket. |
 | `/ping` | everyone | Bot latency. |
 
@@ -78,19 +78,20 @@ manager always can).
 - **Close** (opener or staff) renames the channel to **`close-NNNN`**, posts *Ticket closed by
   @user*, **removes the opener's access**, and shows the staff controls: 📄 **Transcript**,
   🔓 **Open**, ⛔ **Delete**.
-- **Transcript** moves the closed channel into the **Transcript-01** category and renames it to
-  **`transcript-NNNN`**; the channel itself is the transcript. Discord allows 50 channels per
-  category, so when Transcript-01 is full (or a move fails) the bot creates **Transcript-02** and
-  remembers it, never re-checking a full category (`TRANSCRIPTS_PER_CATEGORY`, max 50).
-- **Open** brings a closed or archived ticket back to 🎫 Tickets as `ticket-NNNN` and restores the
-  opener's access; **Delete** removes the channel after a short countdown.
+- **Transcript** saves the whole conversation as a real transcript file, **`transcript-NNNN.txt`**
+  (same number as the ticket), into the private **`transcript-01`** channel inside 🎫 Tickets. When
+  that channel has held `TRANSCRIPTS_PER_CHANNEL` transcripts (default 100), or a post fails, the bot
+  moves on to **`transcript-02`** and remembers it, never re-checking a full channel. The ticket
+  channel itself stays put so staff can Transcript and then Delete.
+- **Open** brings a closed ticket back as `ticket-NNNN` and restores the opener's access;
+  **Delete** removes the channel after a short countdown.
 - `/add` gives someone access to a ticket; `/close` and `/open` mirror the buttons.
 
-A ticket keeps **one number for its whole life** (`ticket-0007` → `close-0007` → `transcript-0007`),
-so tickets and transcripts can never get mixed up. All ticket state lives in the database, so
-numbering, cooldowns and the current Transcript-XX slot survive restarts.
+A ticket keeps **one number for its whole life** (`ticket-0007` → `close-0007` →
+`transcript-0007.txt`), so tickets and transcripts can never get mixed up. All ticket state lives in
+the database, so numbering, cooldowns and the current transcript-XX slot survive restarts.
 
-**Every server is independent.** Ticket numbers, categories, the Transcript-XX slot, cooldowns and the
+**Every server is independent.** Ticket numbers, categories, the transcript-XX slot, cooldowns and the
 staff role are all stored per server, so each server starts at `ticket-0001` and never interferes
 with another. (Only the Steam/FiveM account pools are shared, on purpose, so the same account can
 never be handed out twice anywhere.)

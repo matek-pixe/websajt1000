@@ -6,11 +6,10 @@ const path = require('node:path');
 const { Storage } = require('../src/storage');
 const {
   TicketService,
-  DISCORD_MAX_CHANNELS_PER_CATEGORY,
   formatTicketName,
   formatClosedName,
   formatTranscriptName,
-  formatTranscriptCategory,
+  formatTranscriptChannel,
   defaultGuildBucket,
   evaluateOpen,
   recordTranscriptPosted,
@@ -23,8 +22,9 @@ const CFG = {
   manager: { id: 'MGR' },
   tickets: {
     categoryName: '🎫 Tickets',
-    transcriptCategoryPrefix: 'Transcript-',
-    transcriptsPerCategory: 3,
+    transcriptChannelPrefix: 'transcript-',
+    transcriptsPerChannel: 3,
+    maxTranscriptMessages: 2000,
     reopenCooldownMs: 10 * 60 * 1000,
     deleteDelayMs: 0,
     editTimeoutMs: 1000,
@@ -41,11 +41,11 @@ test('a ticket keeps one number through every state; only the prefix changes', (
   assert.equal(formatTicketName(12345), 'ticket-12345');
 });
 
-test('transcript categories are two-digit: Transcript-01, Transcript-02, ...', () => {
-  assert.equal(formatTranscriptCategory('Transcript-', 1), 'Transcript-01');
-  assert.equal(formatTranscriptCategory('Transcript-', 2), 'Transcript-02');
-  assert.equal(formatTranscriptCategory('Transcript-', 10), 'Transcript-10');
-  assert.equal(formatTranscriptCategory('Transcript-', 100), 'Transcript-100');
+test('transcript channels are two-digit and lowercase: transcript-01, transcript-02, ...', () => {
+  assert.equal(formatTranscriptChannel('transcript-', 1), 'transcript-01');
+  assert.equal(formatTranscriptChannel('transcript-', 2), 'transcript-02');
+  assert.equal(formatTranscriptChannel('transcript-', 10), 'transcript-10');
+  assert.equal(formatTranscriptChannel('Transcript-', 100), 'transcript-100');
 });
 
 test('evaluateOpen: one open ticket per user', () => {
@@ -69,35 +69,21 @@ test('evaluateOpen: 10-minute cooldown after close, then allowed again', () => {
   assert.equal(evaluateOpen(b, 'U1', 1_000_000 + tenMin, tenMin).ok, true);
 });
 
-test('evaluateOpen: closed and archived tickets do not count as open', () => {
+test('evaluateOpen: a closed ticket does not count as open', () => {
   const b = defaultGuildBucket();
   b.tickets.C1 = { userId: 'U1', status: 'closed' };
-  b.tickets.C2 = { userId: 'U1', status: 'archived' };
   assert.equal(evaluateOpen(b, 'U1', 0, 1000).ok, true);
 });
 
-test('transcript category advances only when full, and never goes back', () => {
+test('transcript channel advances only when full, and never goes back', () => {
   const b = defaultGuildBucket();
   recordTranscriptPosted(b, 3);
   recordTranscriptPosted(b, 3);
   assert.deepEqual(b.transcript, { index: 1, count: 2 });
-  recordTranscriptPosted(b, 3); // third one fills Transcript-01
+  recordTranscriptPosted(b, 3); // third one fills transcript-01
   assert.deepEqual(b.transcript, { index: 2, count: 0 });
-  skipTranscriptSlot(b); // unusable category -> skip for good
+  skipTranscriptSlot(b); // unusable channel -> skip for good
   assert.deepEqual(b.transcript, { index: 3, count: 0 });
-});
-
-test('perCategory never exceeds the Discord hard limit of 50', () => {
-  const dir = tmpDir();
-  try {
-    const big = { ...CFG, tickets: { ...CFG.tickets, transcriptsPerCategory: 999 } };
-    const svc = new TicketService(new Storage(path.join(dir, 'db.json')), big);
-    assert.equal(svc.perCategory, DISCORD_MAX_CHANNELS_PER_CATEGORY);
-    const small = new TicketService(new Storage(path.join(dir, 'db2.json')), CFG);
-    assert.equal(small.perCategory, 3);
-  } finally {
-    rm(dir);
-  }
 });
 
 test('formatDuration renders minutes and seconds', () => {
