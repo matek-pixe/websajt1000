@@ -53,6 +53,21 @@ client.once(Events.ClientReady, async (c) => {
   console.log(`[35xw] Logged in as ${c.user.tag} (${c.user.id})`);
   console.log(`[35xw] Manager: ${config.manager.username} (${config.manager.id}) | cooldown: ${config.cooldownMs / 1000}s`);
 
+  // Register the slash commands automatically on startup so a separate `npm run deploy` is optional
+  // (handy on hosts that only run the start command). Bulk-overwrite is idempotent.
+  try {
+    const body = registry.toJSON();
+    if (config.guildId) {
+      await c.application.commands.set(body, config.guildId);
+      console.log(`[35xw] Registered ${body.length} commands to guild ${config.guildId}.`);
+    } else {
+      await c.application.commands.set(body);
+      console.log(`[35xw] Registered ${body.length} global commands (can take up to ~1h to appear the first time).`);
+    }
+  } catch (err) {
+    console.warn(`[35xw] Command registration failed (run "npm run deploy" manually): ${err.message}`);
+  }
+
   for (const guild of c.guilds.cache.values()) {
     try {
       const role = await roleMemory.ensureAutoRole(guild);

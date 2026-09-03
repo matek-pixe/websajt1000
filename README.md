@@ -101,6 +101,16 @@ all servers** (global commands) — they can take up to an hour to show up the f
 all-servers mode, leave `AUTO_ROLE_ID` empty and let each server's owner pick their role with `/aa`
 (or rely on the `AUTO_ROLE_NAME` default per server).
 
+The bot also **registers its commands automatically on startup**, so `npm run deploy` is optional.
+
+### Hosting (e.g. bot-hosting.net)
+
+Hosts that run `node index.js` from the project root work out of the box — the root `index.js` just
+loads `src/index.js`. If your panel lets you set the startup file, either `index.js` or
+`src/index.js` is fine. Put your token and settings in a `.env` file (via the panel's file manager)
+or in the panel's environment variables. Because commands auto-register on startup, you usually only
+need to set the start command and hit start.
+
 ---
 
 ## Refilling accounts
