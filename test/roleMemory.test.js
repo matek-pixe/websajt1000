@@ -79,3 +79,31 @@ test('remember persists roles keyed by guild + user id and survives a reload', (
     rm(dir);
   }
 });
+
+test('per-guild auto role set via /aa persists and takes priority in ensureAutoRole', async () => {
+  const dir = tmpDir();
+  try {
+    const file = path.join(dir, 'db.json');
+    const svc = new RoleMemoryService(new Storage(file), { id: '', name: 'Member' });
+
+    assert.equal(svc.getGuildAutoRole('G'), null);
+    svc.setGuildAutoRole('G', 'ROLE1', { id: 'owner', username: 'matija' });
+    assert.equal(svc.getGuildAutoRole('G'), 'ROLE1');
+
+    // survives a reload
+    const svc2 = new RoleMemoryService(new Storage(file), { id: 'ENVROLE', name: 'Member' });
+    assert.equal(svc2.getGuildAutoRole('G'), 'ROLE1');
+
+    // ensureAutoRole returns the configured role even when an env AUTO_ROLE_ID is also set
+    const roleObj = { id: 'ROLE1', name: 'VIP', managed: false };
+    const guild = { id: 'G', roles: { cache: new Map([['ROLE1', roleObj]]) } };
+    const resolved = await svc2.ensureAutoRole(guild);
+    assert.equal(resolved.id, 'ROLE1');
+
+    // clearing it returns null
+    svc2.setGuildAutoRole('G', null, { id: 'owner', username: 'matija' });
+    assert.equal(svc2.getGuildAutoRole('G'), null);
+  } finally {
+    rm(dir);
+  }
+});

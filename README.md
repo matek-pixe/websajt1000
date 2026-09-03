@@ -13,6 +13,7 @@ gives everyone an **auto role** on join, **remembers each member's roles** by th
 | `/steam` | everyone | Gives you one Steam account that has **never** been given to anyone on the server. |
 | `/5m` | everyone | Gives you one FiveM account that **no one** has ever generated. |
 | `/stats` | everyone | Posts the **Rastrošan** embed: member count + top `/steam` and top `/5m` users (separately). |
+| `/aa` | **server owner** | Sets the role every new member gets on **this** server, e.g. `/aa @Member`. Run with no role to see the current setting. |
 | `/refills` | **manager only** | Attach `steam.txt` to refill the Steam pool. |
 | `/refill5` | **manager only** | Attach `fivem.txt` to refill the FiveM pool. |
 | `/n` | **manager only** | Deletes **all** channels one by one and leaves a single text channel named `zavrseno`. Asks for confirmation first. |
@@ -29,6 +30,14 @@ Every account that is handed out is written into a permanent `given` registry ke
 line itself. `/steam` and `/5m` only ever take from the pool of accounts that are **not** in that
 registry, and refills skip any account that was already given out or is already waiting. So an
 account can only ever be handed to one person, even if the manager re‑uploads an old file.
+
+### Auto role per server
+
+Each server's **owner** chooses the auto role for their own server with `/aa @Role`. That choice is
+stored per server and takes priority over the `AUTO_ROLE_ID` / `AUTO_ROLE_NAME` defaults in `.env`.
+Until an owner runs `/aa`, the bot falls back to those defaults (creating a role named by
+`AUTO_ROLE_NAME` if needed). The bot's own role must sit **above** the chosen role for it to be able
+to assign it; `/aa` warns you if it doesn't.
 
 ### Role memory
 
@@ -80,8 +89,10 @@ npm run deploy   # registers the slash commands
 npm start        # starts the bot
 ```
 
-If you set `GUILD_ID`, commands appear in that server instantly. Without it, commands register
-globally and can take up to an hour to show up.
+If you set `GUILD_ID`, commands appear in that server instantly. **Leave `GUILD_ID` empty to run on
+all servers** (global commands) — they can take up to an hour to show up the first time. In
+all-servers mode, leave `AUTO_ROLE_ID` empty and let each server's owner pick their role with `/aa`
+(or rely on the `AUTO_ROLE_NAME` default per server).
 
 ---
 
@@ -132,5 +143,6 @@ src/
     refills.js refill5.js# /refills  /refill5
     nuke.js              # /n (delete all channels, keep "zavrseno")
     stats.js             # /stats (Rastrošan)
+    autorole.js          # /aa (server owner sets the per-server auto role)
 test/                    # unit tests
 ```

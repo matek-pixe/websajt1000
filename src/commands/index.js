@@ -9,6 +9,7 @@ const modules = [
   require('./refill5'),
   require('./nuke'),
   require('./stats'),
+  require('./autorole'),
 ];
 
 /** name -> command module */

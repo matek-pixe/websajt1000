@@ -22,6 +22,9 @@ function defaults() {
     usage: { steam: {}, fivem: {} },
     // roles.<guildId>.<userId> = { roles: [roleId...], username, updatedAt }
     roles: {},
+    // autoRoles.<guildId> = { roleId, setBy, username, at } -> the role new members get,
+    //   chosen by the server owner with /aa. Overrides the AUTO_ROLE_* env defaults.
+    autoRoles: {},
   };
 }
 
@@ -54,6 +57,7 @@ function sanitize(data) {
     if (!isPlainObject(data.usage[poolName])) data.usage[poolName] = {};
   }
   if (!isPlainObject(data.roles)) data.roles = {};
+  if (!isPlainObject(data.autoRoles)) data.autoRoles = {};
   return data;
 }
 

@@ -85,6 +85,34 @@ class RoleMemoryService {
     return Array.isArray(entry.roles) ? entry.roles.slice() : [];
   }
 
+  /** The role id the server owner chose for this guild via /aa (null if none set). */
+  getGuildAutoRole(guildId) {
+    const map = this.storage.data.autoRoles;
+    if (!map || !hasOwn(map, guildId)) return null;
+    const entry = map[guildId];
+    return entry && entry.roleId ? entry.roleId : null;
+  }
+
+  /** Save the per-guild auto role chosen by the server owner. Pass roleId=null to clear it. */
+  setGuildAutoRole(guildId, roleId, byUser = null) {
+    if (!this.storage.data.autoRoles || typeof this.storage.data.autoRoles !== 'object') {
+      this.storage.data.autoRoles = {};
+    }
+    const map = this.storage.data.autoRoles;
+    Object.defineProperty(map, guildId, {
+      value: {
+        roleId: roleId || null,
+        setBy: byUser ? byUser.id : null,
+        username: byUser ? byUser.username : null,
+        at: new Date().toISOString(),
+      },
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+    this.storage.save();
+  }
+
   /**
    * Find the set of managed role ids in a guild (roles nobody can assign by hand).
    * @param {import('discord.js').Guild} guild
@@ -146,12 +174,22 @@ class RoleMemoryService {
   }
 
   /**
-   * Resolve the configured auto role for a guild. Uses AUTO_ROLE_ID if set, otherwise finds a role
-   * whose name matches AUTO_ROLE_NAME (creating it if it does not exist and the bot may manage roles).
+   * Resolve the auto role for a guild, in priority order:
+   *   1. the role the server owner picked with /aa (per guild);
+   *   2. AUTO_ROLE_ID from the environment;
+   *   3. a role named AUTO_ROLE_NAME (created if missing and the bot may manage roles).
    * @param {import('discord.js').Guild} guild
    * @returns {Promise<import('discord.js').Role|null>}
    */
   async ensureAutoRole(guild) {
+    // 1. Per-guild role chosen by the server owner takes priority.
+    const configuredId = this.getGuildAutoRole(guild.id);
+    if (configuredId) {
+      const configured = guild.roles.cache.get(configuredId) || (await guild.roles.fetch(configuredId).catch(() => null));
+      if (configured) return configured;
+      console.warn(`[roles] /aa role ${configuredId} no longer exists in guild ${guild.id}; falling back to defaults.`);
+    }
+
     const { id, name } = this.autoRoleConfig;
     if (id) {
       const byId = guild.roles.cache.get(id) || (await guild.roles.fetch(id).catch(() => null));
