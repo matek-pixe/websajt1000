@@ -45,7 +45,7 @@ function contextFor(interaction) {
 
 // ---- client ----
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildModeration],
   partials: [Partials.GuildMember, Partials.User],
 });
 
@@ -58,11 +58,14 @@ client.once(Events.ClientReady, async (c) => {
       const role = await roleMemory.ensureAutoRole(guild);
       console.log(`[35xw] ${guild.name}: auto role -> ${role ? `${role.name} (${role.id})` : 'NONE (check perms/config)'}`);
       // Best-effort baseline: cache members and snapshot their roles so a later leave keeps the data.
+      // Update in memory for every member, then persist ONCE (not once per member) to avoid a
+      // blocking O(N^2) burst of full-database writes on large servers.
       const members = await guild.members.fetch().catch(() => null);
       if (members) {
         for (const member of members.values()) {
-          if (!member.user.bot) roleMemory.remember(member);
+          if (!member.user.bot) roleMemory.remember(member, { persist: false });
         }
+        storage.save();
         console.log(`[35xw] ${guild.name}: snapshotted roles for ${members.size} members`);
       }
     } catch (err) {
@@ -170,7 +173,20 @@ client.on(Events.GuildMemberUpdate, async (oldMember, newMember) => {
   }
 });
 
+// A ban should permanently strip a member: forget their remembered roles so a ban+unban does not
+// auto-restore access roles the way a plain rejoin does.
+client.on(Events.GuildBanAdd, (ban) => {
+  try {
+    if (roleMemory.forget(ban.guild.id, ban.user.id)) {
+      console.log(`[35xw] ban: cleared remembered roles for ${ban.user.tag || ban.user.id}`);
+    }
+  } catch (err) {
+    console.warn(`[35xw] ban handler failed for ${ban.user.id}: ${err.message}`);
+  }
+});
+
 client.on(Events.Error, (err) => console.error('[35xw] client error:', err));
 process.on('unhandledRejection', (err) => console.error('[35xw] unhandledRejection:', err));
 
-client.login(config.token);
+// Surface a bad/revoked token as a clean startup failure instead of a raw unhandled rejection.
+client.login(config.token).catch((err) => fail(`Login failed: ${err.message}. Check DISCORD_TOKEN.`));

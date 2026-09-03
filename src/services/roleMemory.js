@@ -143,8 +143,12 @@ class RoleMemoryService {
     return ids;
   }
 
-  /** Persist a member's current roles. Call on leave and on role change. */
-  remember(member) {
+  /**
+   * Persist a member's current roles. Call on leave and on role change.
+   * Pass { persist: false } to only update the in-memory state (the caller then saves once) —
+   * used by the ready-time snapshot so N members do not trigger N full-database writes.
+   */
+  remember(member, { persist = true } = {}) {
     const guild = member.guild;
     const managed = RoleMemoryService.managedRoleIds(guild);
     const roleIds = member.roles && member.roles.cache ? member.roles.cache.map((r) => r.id) : [];
@@ -169,8 +173,17 @@ class RoleMemoryService {
       writable: true,
       configurable: true,
     });
-    this.storage.save();
+    if (persist) this.storage.save();
     return kept;
+  }
+
+  /** Forget a user's remembered roles (e.g. when they are banned, so a ban truly strips them). */
+  forget(guildId, userId) {
+    const bucket = this.storage.data.roles[guildId];
+    if (!bucket || !hasOwn(bucket, userId)) return false;
+    delete bucket[userId];
+    this.storage.save();
+    return true;
   }
 
   /**
@@ -221,24 +234,37 @@ class RoleMemoryService {
     const guild = member.guild;
     const autoRole = await this.ensureAutoRole(guild);
     const assignable = RoleMemoryService.assignableRoleIds(guild);
-    if (autoRole) assignable.add(autoRole.id); // auto role should apply even if the bot just made it
+    const autoRoleId = autoRole ? autoRole.id : null;
+    const applied = [];
 
-    const remembered = this.getRemembered(guild.id, member.id);
-    const toApply = rolesToApplyOnJoin({
-      remembered,
-      autoRoleId: autoRole ? autoRole.id : null,
-      assignableRoleIds: assignable,
-    }).filter((id) => !member.roles.cache.has(id));
-
-    if (toApply.length === 0) return { applied: [], autoRoleId: autoRole ? autoRole.id : null };
-
-    try {
-      await member.roles.add(toApply, '35xw auto role + remembered roles');
-    } catch (err) {
-      console.warn(`[roles] Failed to apply roles to ${member.id} in ${guild.id}: ${err.message}`);
-      return { applied: [], autoRoleId: autoRole ? autoRole.id : null, error: err.message };
+    // Apply the auto role on its own so that if it happens to be un-assignable (e.g. an owner set
+    // it above the bot with /aa), the failure does NOT also discard the member's remembered roles.
+    if (autoRole && !member.roles.cache.has(autoRole.id)) {
+      try {
+        await member.roles.add(autoRole.id, '35xw auto role');
+        applied.push(autoRole.id);
+      } catch (err) {
+        console.warn(`[roles] Failed to add auto role ${autoRole.id} to ${member.id} in ${guild.id}: ${err.message}`);
+      }
     }
-    return { applied: toApply, autoRoleId: autoRole ? autoRole.id : null };
+
+    // Restore remembered roles the bot can actually assign, in a separate call.
+    const remembered = rolesToApplyOnJoin({
+      remembered: this.getRemembered(guild.id, member.id),
+      autoRoleId,
+      assignableRoleIds: assignable,
+    }).filter((id) => id !== autoRoleId && !member.roles.cache.has(id));
+
+    if (remembered.length > 0) {
+      try {
+        await member.roles.add(remembered, '35xw remembered roles');
+        applied.push(...remembered);
+      } catch (err) {
+        console.warn(`[roles] Failed to restore remembered roles for ${member.id} in ${guild.id}: ${err.message}`);
+      }
+    }
+
+    return { applied, autoRoleId };
   }
 }
 

@@ -149,6 +149,32 @@ class AccountService {
     return null;
   }
 
+  /**
+   * Undo a claim: return an account to the pool if delivery to the user failed.
+   * Removes it from the permanent `given` registry, decrements that user's usage, and puts the
+   * account back at the front of the queue so nothing is silently burned. No-op if not given.
+   */
+  unclaim(type, account) {
+    const pool = this.pool(type);
+    if (!hasOwn(pool.given, account)) return false;
+
+    const record = pool.given[account];
+    delete pool.given[account];
+
+    if (record && record.userId) {
+      const usage = this.storage.data.usage[type];
+      if (hasOwn(usage, record.userId)) {
+        const next = (Number(usage[record.userId]) || 0) - 1;
+        if (next > 0) setOwn(usage, record.userId, next);
+        else delete usage[record.userId];
+      }
+    }
+
+    pool.available.unshift(account);
+    this.storage.save();
+    return true;
+  }
+
   /** Numbers for /stats. */
   stats(type, limit = 5) {
     const pool = this.pool(type);

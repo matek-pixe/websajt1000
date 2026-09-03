@@ -2,7 +2,6 @@
 
 const {
   SlashCommandBuilder,
-  PermissionFlagsBits,
   ChannelType,
   EmbedBuilder,
   ButtonBuilder,
@@ -13,6 +12,10 @@ const {
 const { COLORS, ephemeral } = require('./_shared');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Guilds whose nuke is currently running. A fixed cooldown can be shorter than the delete loop on
+// a large server, so this in-progress lock (not the cooldown) is what prevents a second concurrent run.
+const nukingGuilds = new Set();
 
 /** True if a channel is one Discord forbids deleting on Community servers. */
 function isUndeletable(guild, channel) {
@@ -108,8 +111,7 @@ module.exports = {
   buttonPrefix: 'n:',
   data: new SlashCommandBuilder()
     .setName('n')
-    .setDescription('MENADŽER: obriši SVE kanale i ostavi samo jedan tekstualni kanal "zavrseno".')
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+    .setDescription('MENADŽER: obriši SVE kanale i ostavi samo jedan tekstualni kanal "zavrseno".'),
 
   async execute(interaction, ctx) {
     const confirm = new ButtonBuilder()
@@ -128,7 +130,9 @@ module.exports = {
       .setTitle('⚠️ Jesi li siguran?')
       .setDescription(
         `Ovo će **obrisati SVE kanale** na serveru, jedan po jedan, i ostaviti samo ` +
-          `jedan tekstualni kanal **"${ctx.config.finalChannelName}"**.\n\nOvo se ne može poništiti.`,
+          `jedan tekstualni kanal **"${ctx.config.finalChannelName}"**.\n\nOvo se ne može poništiti.\n\n` +
+          `ℹ️ Na Community serverima Discord ne dopušta brisanje obaveznih kanala (pravila i ` +
+          `objave za zajednicu), pa oni ostaju uz "${ctx.config.finalChannelName}".`,
       );
 
     await interaction.reply({ embeds: [embed], components: [row], flags: MessageFlags.Ephemeral });
@@ -160,14 +164,22 @@ module.exports = {
           flags: MessageFlags.Ephemeral,
         });
       }
+      if (nukingGuilds.has(interaction.guildId)) {
+        return interaction.reply({ content: '⏳ Brisanje je već u tijeku…', flags: MessageFlags.Ephemeral });
+      }
       ctx.cooldown.hit(key);
+      nukingGuilds.add(interaction.guildId);
 
       await interaction.update({
         content: '💥 Brišem sve kanale, jedan po jedan…',
         embeds: [],
         components: [],
       });
-      await performNuke(interaction, ctx);
+      try {
+        await performNuke(interaction, ctx);
+      } finally {
+        nukingGuilds.delete(interaction.guildId);
+      }
       return undefined;
     }
 

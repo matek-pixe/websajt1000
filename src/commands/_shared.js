@@ -27,6 +27,11 @@ async function ephemeral(interaction, payload) {
  */
 async function giveAccount(interaction, ctx, type) {
   const info = ctx.accounts.constructor.type(type);
+
+  // Defer first so we have the full 15-minute follow-up window instead of the 3s reply window;
+  // this way a slow save or a transient hiccup cannot make the reply fail and burn an account.
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
   const account = ctx.accounts.claim(type, interaction.user);
 
   if (account === null) {
@@ -49,7 +54,15 @@ async function giveAccount(interaction, ctx, type) {
     .setFooter({ text: `35xw • ${info.label}` })
     .setTimestamp();
 
-  return ephemeral(interaction, { embeds: [embed] });
+  try {
+    return await ephemeral(interaction, { embeds: [embed] });
+  } catch (err) {
+    // Delivery failed: return the account to the pool so it is never silently lost.
+    ctx.accounts.unclaim(type, account);
+    ctx.refundCooldown();
+    console.error(`[35xw] failed to deliver ${type} account to ${interaction.user.id}; rolled back to pool: ${err.message}`);
+    throw err;
+  }
 }
 
 /**

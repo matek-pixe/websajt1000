@@ -46,6 +46,13 @@ to assign it; `/aa` warns you if it doesn't.
   the server entirely. It updates whenever someone's roles change and when they leave.
 - The bot only restores roles it is actually allowed to assign (not managed roles, and only roles
   below its own highest role).
+- **Moderation note:** a plain **kick** does not stop role memory — a kicked member who rejoins gets
+  their old roles back. To permanently strip someone, **ban** them: a ban clears their remembered
+  roles so a later rejoin starts clean.
+
+> **`/n` on Community servers:** Discord does not allow deleting the mandatory rules and
+> community-updates channels, so on a Community server those remain alongside `zavrseno`. On a normal
+> server `/n` really does leave exactly one channel.
 
 ---
 

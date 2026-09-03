@@ -1,6 +1,6 @@
 'use strict';
 
-const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const { COLORS } = require('./_shared');
 
 const MEDALS = ['🥇', '🥈', '🥉'];
@@ -58,6 +58,7 @@ module.exports = {
 
     if (guild.iconURL()) embed.setThumbnail(guild.iconURL({ size: 256 }));
 
-    await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+    // Public on purpose: the Rastrošan board is a server leaderboard everyone should see.
+    await interaction.reply({ embeds: [embed] });
   },
 };

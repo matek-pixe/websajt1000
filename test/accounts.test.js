@@ -120,6 +120,32 @@ test('claim persists across a reload (survives restart)', () => {
   }
 });
 
+test('unclaim returns a burned account to the pool and rolls back usage', () => {
+  const { dir, accounts } = svc();
+  try {
+    accounts.refill('steam', 'a:1\nb:2', user(1));
+    const got = accounts.claim('steam', user(7));
+    let s = accounts.stats('steam');
+    assert.equal(s.given, 1);
+    assert.equal(s.top[0].userId, '7');
+
+    // delivery failed -> put it back
+    assert.equal(accounts.unclaim('steam', got), true);
+    s = accounts.stats('steam');
+    assert.equal(s.given, 0); // no longer marked given
+    assert.equal(s.users, 0); // usage rolled back to 0 and dropped
+    assert.equal(s.available, 2); // account is back in the pool
+
+    // the returned account is handed out again (front of queue), never lost
+    assert.equal(accounts.claim('steam', user(8)), got);
+
+    // unclaiming something that was never given is a no-op
+    assert.equal(accounts.unclaim('steam', 'never:given'), false);
+  } finally {
+    rm(dir);
+  }
+});
+
 test('a __proto__ line in the file cannot poison the given registry', () => {
   const { dir, accounts } = svc();
   try {

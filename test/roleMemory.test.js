@@ -80,6 +80,27 @@ test('remember persists roles keyed by guild + user id and survives a reload', (
   }
 });
 
+test('forget wipes a user\'s remembered roles (used on ban)', () => {
+  const dir = tmpDir();
+  try {
+    const file = path.join(dir, 'db.json');
+    const storage = new Storage(file);
+    const svc = new RoleMemoryService(storage, { id: '', name: 'Member' });
+
+    // seed a snapshot directly
+    storage.data.roles.G = { U1: { roles: ['vip'], username: 'x', updatedAt: 't' } };
+    storage.save();
+    assert.deepEqual(svc.getRemembered('G', 'U1'), ['vip']);
+
+    assert.equal(svc.forget('G', 'U1'), true);
+    assert.deepEqual(svc.getRemembered('G', 'U1'), []);
+    assert.equal(svc.forget('G', 'U1'), false); // already gone
+    assert.equal(svc.forget('nope', 'U1'), false); // unknown guild
+  } finally {
+    rm(dir);
+  }
+});
+
 test('per-guild auto role set via /aa persists and takes priority in ensureAutoRole', async () => {
   const dir = tmpDir();
   try {

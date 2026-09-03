@@ -17,7 +17,8 @@ const config = {
   clientId: env.CLIENT_ID || '',
   guildId: env.GUILD_ID || '',
 
-  // The one and only bot manager. Both the Discord ID and the username are checked.
+  // The one and only bot manager. Access is verified by the Discord ID (spoof-proof);
+  // the username is informational / display only.
   manager: {
     id: (env.MANAGER_ID || '1143659003327553556').trim(),
     username: (env.MANAGER_USERNAME || '35bf').trim().toLowerCase(),
