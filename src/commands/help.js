@@ -34,8 +34,8 @@ module.exports = {
             '`/v [staff:@rola]` — objavi panel „35xw verification" s gumbom OPEN TICKET\n' +
             '`/open` — ponovno otvori zatvoreni ticket\n' +
             '`/add user:@netko` ili `/add role:@rola` — dodaj nekoga u ticket\n' +
-            'Tijek: `ticket-0001` → 🔒 Close → `close-0001` → 📄 Transcript → datoteka `transcript-0001.txt` u kanalu **transcript-01**\n' +
-            'Isti broj cijelo vrijeme. Kad se transcript-01 napuni, bot sam otvori transcript-02.',
+            'Tijek: `ticket-0001` → 🔒 Close → `close-0001` → 📄 Transcript → kanal `transcript-0001` (s datotekom transkripta) u kategoriji **Transcript-01**\n' +
+            'Isti broj cijelo vrijeme. Kad se Transcript-01 napuni (50), bot sam otvori Transcript-02.',
         },
         {
           name: '⚙️ Vlasnik servera',

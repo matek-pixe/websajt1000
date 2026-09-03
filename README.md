@@ -79,19 +79,21 @@ manager always can).
   @user*, **removes the opener's access**, and shows the staff controls: 📄 **Transcript**,
   🔓 **Open**, ⛔ **Delete**.
 - **Transcript** saves the whole conversation as a real transcript file, **`transcript-NNNN.txt`**
-  (same number as the ticket), into the private **`transcript-01`** channel inside 🎫 Tickets. When
-  that channel has held `TRANSCRIPTS_PER_CHANNEL` transcripts (default 100), or a post fails, the bot
-  moves on to **`transcript-02`** and remembers it, never re-checking a full channel. The ticket
-  channel itself stays put so staff can Transcript and then Delete.
+  (same number as the ticket), into its own private channel **`transcript-NNNN`** inside the
+  **Transcript-01** category. Discord allows 50 channels per category, so when Transcript-01 is full
+  (or creating a channel fails) the bot creates **Transcript-02** and remembers it, never re-checking
+  a full category (`TRANSCRIPTS_PER_CATEGORY`, max 50). The ticket channel itself stays put as
+  `close-NNNN` so staff can Transcript and then Delete; saving twice reuses the same transcript channel.
 - **Open** brings a closed ticket back as `ticket-NNNN` and restores the opener's access;
   **Delete** removes the channel after a short countdown.
 - `/add` gives someone access to a ticket; `/close` and `/open` mirror the buttons.
 
 A ticket keeps **one number for its whole life** (`ticket-0007` → `close-0007` →
-`transcript-0007.txt`), so tickets and transcripts can never get mixed up. All ticket state lives in
-the database, so numbering, cooldowns and the current transcript-XX slot survive restarts.
+`transcript-0007` / `transcript-0007.txt`), so tickets and transcripts can never get mixed up. All
+ticket state lives in the database, so numbering, cooldowns and the current Transcript-XX slot
+survive restarts.
 
-**Every server is independent.** Ticket numbers, categories, the transcript-XX slot, cooldowns and the
+**Every server is independent.** Ticket numbers, categories, the Transcript-XX slot, cooldowns and the
 staff role are all stored per server, so each server starts at `ticket-0001` and never interferes
 with another. (Only the Steam/FiveM account pools are shared, on purpose, so the same account can
 never be handed out twice anywhere.)

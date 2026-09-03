@@ -16,6 +16,9 @@ function setOwn(obj, key, value) {
 }
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** Discord allows at most this many channels inside one category. */
+const DISCORD_MAX_CHANNELS_PER_CATEGORY = 50;
+
 /** Embed colours. `blend` matches Discord's dark embed background so no side bar shows. */
 const TICKET_COLORS = Object.freeze({
   blend: 0x2b2d31,
@@ -38,9 +41,10 @@ const BUTTONS = Object.freeze({
 
 /**
  * A ticket keeps ONE number for its whole life:
- *   open   -> channel ticket-0001
- *   closed -> channel close-0001
- *   its transcript file is transcript-0001.txt
+ *   open       -> channel ticket-0001            (in the 🎫 Tickets category)
+ *   closed     -> channel close-0001             (stays there)
+ *   transcript -> channel transcript-0001        (in a Transcript-XX category) holding the
+ *                 real transcript file transcript-0001.txt
  */
 const pad4 = (n) => String(n).padStart(4, '0');
 function formatTicketName(n) {
@@ -52,9 +56,9 @@ function formatClosedName(n) {
 function formatTranscriptName(n) {
   return `transcript-${pad4(n)}`;
 }
-/** Transcript channels: transcript-01, transcript-02, ... */
-function formatTranscriptChannel(prefix, i) {
-  return `${prefix}${String(i).padStart(2, '0')}`.toLowerCase();
+/** Transcript categories: Transcript-01, Transcript-02, ... (each holds up to 50 channels). */
+function formatTranscriptCategory(prefix, i) {
+  return `${prefix}${String(i).padStart(2, '0')}`;
 }
 
 function defaultGuildBucket() {
@@ -62,7 +66,7 @@ function defaultGuildBucket() {
     counter: 0,
     categoryId: null,
     staffRoleId: null,
-    // which transcript-XX channel receives the next transcript, and how many it already holds
+    // which Transcript-XX category receives the next transcript channel, and how many it holds
     transcript: { index: 1, count: 0 },
     tickets: {},
     users: {},
@@ -87,16 +91,16 @@ function evaluateOpen(bucket, userId, now, cooldownMs) {
   return { ok: true };
 }
 
-/** One more transcript went into the current channel; move on once it is full. */
-function recordTranscriptPosted(bucket, perChannel) {
+/** One more transcript channel went into the current category; move on once it is full. */
+function recordTranscriptPosted(bucket, perCategory) {
   bucket.transcript.count += 1;
-  if (bucket.transcript.count >= perChannel) {
+  if (bucket.transcript.count >= perCategory) {
     bucket.transcript.index += 1;
     bucket.transcript.count = 0;
   }
 }
 
-/** The current transcript channel could not be used: skip it for good and never look at it again. */
+/** The current transcript category could not be used: skip it for good and never look at it again. */
 function skipTranscriptSlot(bucket) {
   bucket.transcript.index += 1;
   bucket.transcript.count = 0;
@@ -171,6 +175,11 @@ class TicketService {
     if (!b.tickets || typeof b.tickets !== 'object') b.tickets = {};
     if (!b.users || typeof b.users !== 'object') b.users = {};
     return b;
+  }
+
+  /** Never exceed Discord's per-category channel limit, whatever the config says. */
+  get perCategory() {
+    return Math.min(this.opts.transcriptsPerCategory, DISCORD_MAX_CHANNELS_PER_CATEGORY);
   }
 
   // ---- config / lookups ----
@@ -489,50 +498,68 @@ class TicketService {
 
   // ---- transcripts ----
 
-  /** The private transcript-XX text channel that receives the next transcript (created on demand). */
-  async ensureTranscriptChannel(guild) {
+  /** The Transcript-XX category that receives the next transcript channel (created on demand). */
+  async ensureTranscriptCategory(guild) {
     const b = this._guild(guild.id);
-    const name = formatTranscriptChannel(this.opts.transcriptChannelPrefix, b.transcript.index);
-    let ch = guild.channels.cache.find((c) => c.type === ChannelType.GuildText && c.name === name) || null;
-    if (!ch) {
-      const category = await this.ensureCategory(guild);
-      ch = await guild.channels.create({
+    const name = formatTranscriptCategory(this.opts.transcriptCategoryPrefix, b.transcript.index);
+    let cat =
+      guild.channels.cache.find(
+        (c) => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === name.toLowerCase(),
+      ) || null;
+    if (!cat) {
+      cat = await guild.channels.create({
         name,
-        type: ChannelType.GuildText,
-        parent: category.id,
+        type: ChannelType.GuildCategory,
         permissionOverwrites: this._baseOverwrites(guild),
-        topic: '35xw ticket transcripts',
-        reason: '35xw transcript channel',
+        reason: '35xw transcript category',
       });
     }
-    return ch;
+    return cat;
   }
 
   /**
-   * Post a transcript into the current transcript-XX channel. When that channel is full (or
-   * unusable) the bot advances to the next number and remembers it, so it never re-checks a full one.
+   * The private transcript-NNNN channel for a ticket, inside the current Transcript-XX category.
+   * Reused if it already exists (transcript saved twice). When the category is full (Discord allows
+   * 50 channels) or creating fails, the bot advances to the next Transcript-XX and remembers it, so
+   * a full category is never re-checked.
    */
-  async postTranscript(guild, payload) {
+  async ensureTranscriptChannel(guild, ticket) {
     const b = this._guild(guild.id);
+    const name = formatTranscriptName(ticket.number);
+
+    // Already saved before? Reuse that channel wherever it lives.
+    const existing = guild.channels.cache.find((c) => c.type === ChannelType.GuildText && c.name === name) || null;
+    if (existing) {
+      const category = existing.parentId ? guild.channels.cache.get(existing.parentId) || null : null;
+      return { channel: existing, category, created: false };
+    }
+
     let lastErr = null;
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      if (b.transcript.count >= this.opts.transcriptsPerChannel) {
+      if (b.transcript.count >= this.perCategory) {
         skipTranscriptSlot(b);
         this.storage.save();
       }
-      const ch = await this.ensureTranscriptChannel(guild);
+      const category = await this.ensureTranscriptCategory(guild);
       try {
-        await ch.send(payload);
-        recordTranscriptPosted(b, this.opts.transcriptsPerChannel);
+        const channel = await guild.channels.create({
+          name,
+          type: ChannelType.GuildText,
+          parent: category.id,
+          permissionOverwrites: this._baseOverwrites(guild),
+          topic: `Transcript of ${formatTicketName(ticket.number)} • opened by ${ticket.username}`,
+          reason: `35xw transcript for ${formatTicketName(ticket.number)}`,
+        });
+        recordTranscriptPosted(b, this.perCategory);
         this.storage.save();
-        return ch;
+        return { channel, category, created: true };
       } catch (err) {
         lastErr = err;
         skipTranscriptSlot(b);
         this.storage.save();
       }
     }
-    throw lastErr || new Error('Could not post the transcript');
+    throw lastErr || new Error('Could not create the transcript channel');
   }
 
   /** Read the whole ticket conversation (oldest first) as plain text. */
@@ -575,7 +602,10 @@ class TicketService {
     return { text: header + lines.join('\n') + '\n', count: all.length };
   }
 
-  /** Transcript button: save the conversation as transcript-NNNN.txt into the transcript channel. */
+  /**
+   * Transcript button: save the conversation as transcript-NNNN.txt into its own transcript-NNNN
+   * channel inside the current Transcript-XX category. The closed ticket channel stays where it is.
+   */
   async transcript(channel, requester) {
     const t = this.get(channel.guild.id, channel.id);
     if (!t) return { ok: false, reason: 'not_ticket' };
@@ -595,11 +625,13 @@ class TicketService {
       )
       .setTimestamp();
 
-    const target = await this.postTranscript(channel.guild, { embeds: [embed], files: [file] });
+    const { channel: target, category } = await this.ensureTranscriptChannel(channel.guild, t);
+    await target.send({ embeds: [embed], files: [file] });
+
     t.transcriptAt = Date.now();
     t.transcriptChannelId = target.id;
     this.storage.save();
-    return { ok: true, channel: target, count, fileName: `${name}.txt` };
+    return { ok: true, channel: target, category, count, fileName: `${name}.txt` };
   }
 }
 
@@ -607,10 +639,11 @@ module.exports = {
   TicketService,
   TICKET_COLORS,
   BUTTONS,
+  DISCORD_MAX_CHANNELS_PER_CATEGORY,
   formatTicketName,
   formatClosedName,
   formatTranscriptName,
-  formatTranscriptChannel,
+  formatTranscriptCategory,
   defaultGuildBucket,
   evaluateOpen,
   recordTranscriptPosted,

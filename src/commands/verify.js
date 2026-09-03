@@ -68,7 +68,8 @@ module.exports = {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       try {
         const res = await ctx.tickets.transcript(interaction.channel, interaction.user);
-        return say(interaction, `📄 **${res.fileName}** saved to <#${res.channel.id}> (${res.count} messages).`);
+        const where = res.category ? ` in **${res.category.name}**` : '';
+        return say(interaction, `📄 Transcript saved to <#${res.channel.id}>${where} (${res.count} messages).`);
       } catch (err) {
         console.error('[35xw] transcript failed:', err);
         return say(interaction, `❌ Could not save the transcript: ${err.message}`);
