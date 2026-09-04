@@ -34,6 +34,24 @@ setInterval(() => cooldown.sweep(), 60_000).unref();
 
 const services = { config, storage, accounts, roleMemory, tickets, bypass, cooldown };
 
+/**
+ * Coalesce bursts of database writes into one. A mass role change (e.g. /f on a big server) fires
+ * one GuildMemberUpdate per member; saving once per event would mean hundreds of full-file writes.
+ */
+let saveTimer = null;
+function scheduleSave(delayMs = 1000) {
+  if (saveTimer) return;
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    try {
+      storage.save();
+    } catch (err) {
+      console.warn(`[35xw] deferred save failed: ${err.message}`);
+    }
+  }, delayMs);
+  if (typeof saveTimer.unref === 'function') saveTimer.unref();
+}
+
 function isManager(user) {
   return user && user.id === config.manager.id;
 }
@@ -285,7 +303,10 @@ client.on(Events.GuildMemberUpdate, async (oldMember, newMember) => {
     if (newMember.user && newMember.user.bot) return;
     const before = oldMember.roles ? [...oldMember.roles.cache.keys()].sort().join(',') : '';
     const after = newMember.roles ? [...newMember.roles.cache.keys()].sort().join(',') : '';
-    if (before !== after) roleMemory.remember(newMember);
+    if (before !== after) {
+      roleMemory.remember(newMember, { persist: false });
+      scheduleSave();
+    }
   } catch (err) {
     console.warn(`[35xw] update handler failed for ${newMember.id}: ${err.message}`);
   }

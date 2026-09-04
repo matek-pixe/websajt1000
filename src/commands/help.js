@@ -38,10 +38,11 @@ module.exports = {
             'Isti broj cijelo vrijeme. Kad se Transcript-01 napuni (50), bot sam otvori Transcript-02.',
         },
         {
-          name: '⚙️ Vlasnik servera',
+          name: '⚙️ Vlasnik servera / admini',
           value:
             '`/aa role:@rola` — postavi rolu koju svaki novi član dobije\n' +
-            '`/aa` (bez role) — pokaži koja je auto rola trenutno postavljena',
+            '`/aa` (bez role) — pokaži koja je auto rola trenutno postavljena\n' +
+            '`/f role:@rola` — daj tu rolu SVIM članovima (samo admini); `action:Remove` je svima makne, `bots:true` uključi i botove',
         },
         {
           name: '🔑 Samo menadžer',

@@ -15,6 +15,7 @@ gives everyone an **auto role** on join, **remembers each member's roles** by th
 | `/help` | everyone | Lists every command and how to use it. |
 | `/stats` | everyone | Posts the **Rastrošan** embed: member count + top `/steam` and top `/5m` users (separately). |
 | `/aa` | **server owner** | Sets the role every new member gets on **this** server, e.g. `/aa @Member`. Run with no role to see the current setting. |
+| `/f role` | **admins** | Gives a role to **every member** of the server (bots skipped unless `bots:true`). `action:Remove` takes it away from everyone. Shows progress and a summary. |
 | `/refills` | **manager only** | Attach `steam.txt` to refill the Steam pool. |
 | `/refill5` | **manager only** | Attach `fivem.txt` to refill the FiveM pool. |
 | `/b [mode]` | **manager only** | Bypass switch: while on, the manager is exempt from every limit (command cooldowns, one-open-ticket rule, ticket cooldown). `/b` toggles; `mode:on/off` sets it. Persisted across restarts. |
