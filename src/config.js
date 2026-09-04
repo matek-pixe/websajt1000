@@ -66,6 +66,31 @@ const config = {
     // (Discord rate-limits channel renames to 2 per 10 minutes).
     editTimeoutMs: 8000,
   },
+
+  // Role-gated website: visitors sign in with Discord and only get in if they hold a required role.
+  web: {
+    enabled: /^(1|true|yes|on)$/i.test((env.WEB_ENABLED || '').trim()),
+    // Hosts usually hand the port over as SERVER_PORT.
+    port: positiveNumber(env.WEB_PORT || env.SERVER_PORT, 3000),
+    host: (env.WEB_HOST || '0.0.0.0').trim(),
+    // Public address of the site, e.g. https://35xw.example.com (used for the OAuth2 redirect).
+    publicUrl: (env.WEB_PUBLIC_URL || '').trim().replace(/\/+$/, ''),
+    // OAuth2 client secret from the Developer Portal (OAuth2 page).
+    clientSecret: (env.DISCORD_CLIENT_SECRET || '').trim(),
+    // Which server and which role(s) grant access (comma-separated role ids = any of them).
+    guildId: (env.WEB_GUILD_ID || env.GUILD_ID || '').trim(),
+    roleIds: (env.WEB_ROLE_ID || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+    // Secret for signing session cookies; generated and stored in DATA_DIR if left empty.
+    sessionSecret: (env.WEB_SESSION_SECRET || '').trim(),
+    sessionHours: positiveNumber(env.WEB_SESSION_HOURS, 24),
+    // How often a logged-in visitor's role is re-checked.
+    recheckMinutes: positiveNumber(env.WEB_RECHECK_MINUTES, 10),
+    // Folder with public/ (login + denied pages) and protected/ (your website).
+    dir: path.resolve(env.WEB_DIR || path.join(__dirname, '..', 'web')),
+  },
 };
 
 module.exports = config;

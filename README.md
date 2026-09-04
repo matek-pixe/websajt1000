@@ -98,6 +98,26 @@ staff role are all stored per server, so each server starts at `ticket-0001` and
 with another. (Only the Steam/FiveM account pools are shared, on purpose, so the same account can
 never be handed out twice anywhere.)
 
+### Website gated by a Discord role
+
+The bot can also serve a website that only members with a certain role can open. Visitors click
+**Sign in with Discord**; the bot checks their roles on your server; if they hold one of the required
+roles they get in, otherwise they see a "no access" page naming the role they need. No extra packages.
+
+1. In the Developer Portal open your app → **OAuth2**:
+   - copy the **Client Secret** into `.env` as `DISCORD_CLIENT_SECRET`;
+   - under **Redirects** add exactly `https://YOUR-DOMAIN/callback` (your `WEB_PUBLIC_URL` + `/callback`).
+2. In `.env` set `WEB_ENABLED=true`, `WEB_PUBLIC_URL=https://YOUR-DOMAIN`, `WEB_ROLE_ID=<role id>`
+   (several ids separated by commas = any of them), and `WEB_GUILD_ID` if it differs from `GUILD_ID`.
+   The port comes from `WEB_PORT`, or from the host's `SERVER_PORT` automatically.
+3. Put your website files in `web/protected/` (start with the sample `index.html`). Everything in that
+   folder is protected; `web/public/` holds the login and denied pages, which you can restyle freely.
+4. Restart the bot. The console prints the address and the exact redirect URL it expects.
+
+Sessions are signed cookies (secret auto-generated into `DATA_DIR/web-secret.txt`), last
+`WEB_SESSION_HOURS` (24) and the role is re-checked every `WEB_RECHECK_MINUTES` (10), so someone who
+loses the role also loses access. `/logout` signs out, `/health` answers `ok` for uptime checks.
+
 ---
 
 ## Setup

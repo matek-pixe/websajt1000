@@ -10,6 +10,9 @@ const { RoleMemoryService } = require('./services/roleMemory');
 const { TicketService } = require('./services/tickets');
 const { BypassService } = require('./services/bypass');
 const { Cooldown } = require('./services/cooldown');
+const { createWebServer } = require('./web/server');
+const fs = require('node:fs');
+const crypto = require('node:crypto');
 const registry = require('./commands');
 
 function fail(message) {
@@ -80,6 +83,61 @@ async function registerCommands(c) {
   }
 }
 
+/** Session-cookie secret: use WEB_SESSION_SECRET, else generate one once and keep it in DATA_DIR. */
+function loadOrCreateWebSecret() {
+  if (config.web.sessionSecret) return config.web.sessionSecret;
+  const file = path.join(config.dataDir, 'web-secret.txt');
+  try {
+    const existing = fs.readFileSync(file, 'utf8').trim();
+    if (existing) return existing;
+  } catch {
+    /* not there yet */
+  }
+  const secret = crypto.randomBytes(48).toString('hex');
+  fs.mkdirSync(config.dataDir, { recursive: true });
+  fs.writeFileSync(file, secret, { encoding: 'utf8', mode: 0o600 });
+  return secret;
+}
+
+/** Start the role-gated website (only when WEB_ENABLED=true and fully configured). */
+async function startWeb(c) {
+  const w = config.web;
+  if (!w.enabled) return;
+
+  const missing = [];
+  if (!w.clientSecret) missing.push('DISCORD_CLIENT_SECRET');
+  if (!w.guildId) missing.push('WEB_GUILD_ID (or GUILD_ID)');
+  if (!w.roleIds.length) missing.push('WEB_ROLE_ID');
+  if (missing.length) {
+    console.warn(`[35xw] web: NOT started, missing ${missing.join(', ')} in .env`);
+    return;
+  }
+
+  const checkMember = async (userId) => {
+    const guild = c.guilds.cache.get(w.guildId) || (await c.guilds.fetch(w.guildId).catch(() => null));
+    if (!guild) return { isMember: false, roleIds: [] };
+    const member = await guild.members.fetch(userId).catch(() => null);
+    if (!member) return { isMember: false, roleIds: [] };
+    return { isMember: true, roleIds: [...member.roles.cache.keys()] };
+  };
+  const roleNames = () => {
+    const guild = c.guilds.cache.get(w.guildId);
+    return w.roleIds.map((id) => (guild && guild.roles.cache.get(id) ? guild.roles.cache.get(id).name : id));
+  };
+
+  const site = createWebServer({
+    web: w,
+    clientId: config.clientId,
+    sessionSecret: loadOrCreateWebSecret(),
+    checkMember,
+    roleNames,
+  });
+  const { port } = await site.start();
+  console.log(`[35xw] web: listening on ${w.host}:${port} | public URL: ${w.publicUrl || '(from request host)'}`);
+  console.log(`[35xw] web: access requires role(s) ${roleNames().join(', ')} on guild ${w.guildId}`);
+  console.log(`[35xw] web: OAuth2 redirect must be ${w.publicUrl || 'https://<your-domain>'}/callback`);
+}
+
 // ---- client ----
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildModeration],
@@ -113,6 +171,9 @@ client.once(Events.ClientReady, async (c) => {
     }
   }
   console.log('[35xw] Ready.');
+
+  // Website (optional) — never lets a web problem take the bot down.
+  startWeb(c).catch((err) => console.error(`[35xw] web: failed to start: ${err.message}`));
 });
 
 // ---- slash commands + buttons ----
