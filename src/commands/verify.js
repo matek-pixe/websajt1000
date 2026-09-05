@@ -2,11 +2,11 @@
 
 const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const { BUTTONS, panelEmbed, panelRow } = require('../services/tickets');
-const { say, openTicketFlow, requireTicket, requireStaff } = require('./_tickets');
+const { say, openTicketFlow, requireTicket } = require('./_tickets');
 
 /**
  * /v — post the 35xw verification panel with the OPEN TICKET button.
- * This module also owns every "tk:" button (open / close / transcript / reopen / delete).
+ * This module also owns every "tk:" button (open / close).
  */
 module.exports = {
   managerOnly: false,
@@ -45,47 +45,19 @@ module.exports = {
       return openTicketFlow(interaction, ctx);
     }
 
-    // Everything below happens inside a ticket channel.
-    const ticket = await requireTicket(interaction, ctx);
-    if (!ticket) return undefined;
-
     if (id === BUTTONS.close) {
+      const ticket = await requireTicket(interaction, ctx);
+      if (!ticket) return undefined;
       const isOpener = interaction.user.id === ticket.userId;
       if (!isOpener && !ctx.tickets.isStaff(interaction.member, interaction.guildId)) {
         return say(interaction, '⛔ Only the ticket opener or staff can close this ticket.');
       }
-      if (ticket.status !== 'open') return say(interaction, 'This ticket is already closed.');
+      if (ticket.status !== 'open') return say(interaction, 'This ticket is already being closed.');
       await interaction.update({ components: [] }); // disable the Close button that was pressed
-      await ctx.tickets.closeTicket(interaction.channel, interaction.user);
-      return undefined;
-    }
-
-    // Transcript / Open / Delete are staff-only.
-    if (!(await requireStaff(interaction, ctx))) return undefined;
-
-    if (id === BUTTONS.transcript) {
-      if (ticket.status === 'open') return say(interaction, 'Close the ticket first.');
-      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      try {
-        const res = await ctx.tickets.transcript(interaction.channel, interaction.user);
-        const where = res.category ? ` in **${res.category.name}**` : '';
-        return say(interaction, `📄 Transcript saved to <#${res.channel.id}>${where} (${res.count} messages).`);
-      } catch (err) {
-        console.error('[35xw] transcript failed:', err);
-        return say(interaction, `❌ Could not save the transcript: ${err.message}`);
+      const res = await ctx.tickets.closeTicket(interaction.channel, interaction.user);
+      if (!res.ok && res.reason === 'in_progress') {
+        await interaction.followUp({ content: 'This ticket is already being closed.', flags: MessageFlags.Ephemeral }).catch(() => {});
       }
-    }
-
-    if (id === BUTTONS.reopen) {
-      if (ticket.status === 'open') return say(interaction, 'This ticket is already open.');
-      await interaction.update({ components: [] });
-      await ctx.tickets.reopenTicket(interaction.channel, interaction.user);
-      return undefined;
-    }
-
-    if (id === BUTTONS.delete) {
-      await interaction.update({ components: [] });
-      await ctx.tickets.deleteTicket(interaction.channel, interaction.user);
       return undefined;
     }
 

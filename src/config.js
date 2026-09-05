@@ -50,21 +50,15 @@ const config = {
   tickets: {
     // Category that holds open/closed tickets (created on first use, renamed if it already exists).
     categoryName: (env.TICKET_CATEGORY_NAME || '🎫 Tickets').trim() || '🎫 Tickets',
-    // Each transcript gets its own private channel transcript-NNNN (same number as the ticket),
-    // placed in categories named <prefix>01, <prefix>02, ... (Transcript-01, Transcript-02, ...).
-    transcriptCategoryPrefix: (env.TRANSCRIPT_CATEGORY_PREFIX || 'Transcript-').trim() || 'Transcript-',
-    // How many transcript channels fit in one Transcript-XX category before moving to the next.
-    // Discord's hard limit is 50 channels per category; the service never exceeds that.
-    transcriptsPerCategory: positiveNumber(env.TRANSCRIPTS_PER_CATEGORY, 50),
+    // Closing a ticket saves an HTML transcript (transcript-NNNN.html) into this single private
+    // channel inside the tickets category, then deletes the ticket channel.
+    transcriptChannelName: (env.TRANSCRIPT_CHANNEL_NAME || 'transcripts').trim().toLowerCase() || 'transcripts',
     // Safety cap on how many messages a transcript will include.
     maxTranscriptMessages: 2000,
     // After a ticket is closed the opener must wait this long before opening a new one.
     reopenCooldownMs: positiveNumber(env.TICKET_REOPEN_COOLDOWN_MINUTES, 10) * 60 * 1000,
-    // Countdown before a ticket channel is actually deleted.
+    // Countdown between "closed" and the channel actually being deleted.
     deleteDelayMs: 5000,
-    // How long to wait for a rename/move before letting it finish in the background
-    // (Discord rate-limits channel renames to 2 per 10 minutes).
-    editTimeoutMs: 8000,
   },
 
   // Role-gated website: visitors sign in with Discord and only get in if they hold a required role.

@@ -9,6 +9,7 @@ const {
   ActionRowBuilder,
   AttachmentBuilder,
 } = require('discord.js');
+const { renderTranscriptHtml, formatSpan } = require('./transcriptHtml');
 
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
 function setOwn(obj, key, value) {
@@ -16,49 +17,29 @@ function setOwn(obj, key, value) {
 }
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Discord allows at most this many channels inside one category. */
-const DISCORD_MAX_CHANNELS_PER_CATEGORY = 50;
-
 /** Embed colours. `blend` matches Discord's dark embed background so no side bar shows. */
 const TICKET_COLORS = Object.freeze({
   blend: 0x2b2d31,
   open: 0x5865f2,
   closed: 0xf1c40f,
-  reopened: 0x2ecc71,
-  deleted: 0xe74c3c,
+  transcript: 0x57f287,
 });
 
 /** Button ids. Everything starts with "tk:" so the /v command module can own the routing. */
 const BUTTONS = Object.freeze({
   open: 'tk:open',
   close: 'tk:close',
-  transcript: 'tk:transcript',
-  reopen: 'tk:reopen',
-  delete: 'tk:delete',
 });
 
 // ---------- pure helpers (unit-tested) ----------
 
-/**
- * A ticket keeps ONE number for its whole life:
- *   open       -> channel ticket-0001            (in the 🎫 Tickets category)
- *   closed     -> channel close-0001             (stays there)
- *   transcript -> channel transcript-0001        (in a Transcript-XX category) holding the
- *                 real transcript file transcript-0001.txt
- */
+/** A ticket keeps ONE number for its whole life: channel ticket-0001, transcript transcript-0001.html */
 const pad4 = (n) => String(n).padStart(4, '0');
 function formatTicketName(n) {
   return `ticket-${pad4(n)}`;
 }
-function formatClosedName(n) {
-  return `close-${pad4(n)}`;
-}
 function formatTranscriptName(n) {
   return `transcript-${pad4(n)}`;
-}
-/** Transcript categories: Transcript-01, Transcript-02, ... (each holds up to 50 channels). */
-function formatTranscriptCategory(prefix, i) {
-  return `${prefix}${String(i).padStart(2, '0')}`;
 }
 
 function defaultGuildBucket() {
@@ -66,8 +47,6 @@ function defaultGuildBucket() {
     counter: 0,
     categoryId: null,
     staffRoleId: null,
-    // which Transcript-XX category receives the next transcript channel, and how many it holds
-    transcript: { index: 1, count: 0 },
     tickets: {},
     users: {},
   };
@@ -91,26 +70,39 @@ function evaluateOpen(bucket, userId, now, cooldownMs) {
   return { ok: true };
 }
 
-/** One more transcript channel went into the current category; move on once it is full. */
-function recordTranscriptPosted(bucket, perCategory) {
-  bucket.transcript.count += 1;
-  if (bucket.transcript.count >= perCategory) {
-    bucket.transcript.index += 1;
-    bucket.transcript.count = 0;
-  }
-}
-
-/** The current transcript category could not be used: skip it for good and never look at it again. */
-function skipTranscriptSlot(bucket) {
-  bucket.transcript.index += 1;
-  bucket.transcript.count = 0;
-}
-
 function formatDuration(ms) {
   const total = Math.ceil(ms / 1000);
   const m = Math.floor(total / 60);
   const s = total % 60;
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
+/** Turn discord.js messages into the plain shape the HTML renderer understands. */
+function normalizeMessage(m) {
+  const author = m.author || {};
+  const avatar =
+    typeof author.displayAvatarURL === 'function' ? author.displayAvatarURL({ extension: 'png', size: 64 }) : author.avatar || null;
+  const mentions = {};
+  if (m.mentions && m.mentions.users) {
+    for (const u of m.mentions.users.values()) mentions[u.id] = u.username;
+  }
+  return {
+    id: m.id,
+    createdTimestamp: m.createdTimestamp,
+    author: {
+      id: author.id,
+      name: (m.member && m.member.displayName) || author.globalName || author.username || author.tag || 'unknown',
+      tag: author.tag || author.username || '',
+      bot: !!author.bot,
+      avatar,
+    },
+    content: m.content || '',
+    mentions,
+    attachments: m.attachments ? [...m.attachments.values()].map((a) => ({ name: a.name, url: a.url, contentType: a.contentType || '' })) : [],
+    embeds: (m.embeds || [])
+      .map((e) => ({ title: e.title || '', description: e.description || '' }))
+      .filter((e) => e.title || e.description),
+  };
 }
 
 // ---------- UI builders ----------
@@ -124,14 +116,6 @@ function panelRow() {
 function closeRow() {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(BUTTONS.close).setLabel('Close').setEmoji('🔒').setStyle(ButtonStyle.Secondary),
-  );
-}
-
-function controlsRow() {
-  return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(BUTTONS.transcript).setLabel('Transcript').setEmoji('📄').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(BUTTONS.reopen).setLabel('Open').setEmoji('🔓').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(BUTTONS.delete).setLabel('Delete').setEmoji('⛔').setStyle(ButtonStyle.Danger),
   );
 }
 
@@ -161,25 +145,18 @@ class TicketService {
     this.opts = config.tickets;
     /** users whose ticket channel is being created right now (blocks double-clicks) */
     this.creating = new Set();
+    /** channels whose close is in progress (blocks a double Close) */
+    this.closing = new Set();
   }
 
   _guild(guildId) {
     const all = this.storage.data.tickets;
     if (!hasOwn(all, guildId)) setOwn(all, guildId, defaultGuildBucket());
     const b = all[guildId];
-    // heal older / hand-edited buckets
     if (typeof b.counter !== 'number') b.counter = 0;
-    if (!b.transcript || typeof b.transcript !== 'object') b.transcript = { index: 1, count: 0 };
-    if (typeof b.transcript.index !== 'number' || b.transcript.index < 1) b.transcript.index = 1;
-    if (typeof b.transcript.count !== 'number' || b.transcript.count < 0) b.transcript.count = 0;
     if (!b.tickets || typeof b.tickets !== 'object') b.tickets = {};
     if (!b.users || typeof b.users !== 'object') b.users = {};
     return b;
-  }
-
-  /** Never exceed Discord's per-category channel limit, whatever the config says. */
-  get perCategory() {
-    return Math.min(this.opts.transcriptsPerCategory, DISCORD_MAX_CHANNELS_PER_CATEGORY);
   }
 
   // ---- config / lookups ----
@@ -236,7 +213,6 @@ class TicketService {
     return flags.filter((f) => perms.has(f));
   }
 
-  /** Same idea for the { ViewChannel: true, ... } object form used by permissionOverwrites.edit(). */
   _heldObject(guild, obj) {
     const me = guild.members.me;
     const perms = me && me.permissions && typeof me.permissions.has === 'function' ? me.permissions : null;
@@ -263,10 +239,7 @@ class TicketService {
     const b = this._guild(guild.id);
     const me = guild.members.me;
     const out = [{ id: guild.id, deny: [PermissionFlagsBits.ViewChannel] }];
-    if (me) {
-      // The bot only needs to see and talk in the channel; deleting it uses guild-level Manage Channels.
-      out.push({ id: me.id, allow: this._held(guild, TicketService.PARTICIPANT_FLAGS) });
-    }
+    if (me) out.push({ id: me.id, allow: this._held(guild, TicketService.PARTICIPANT_FLAGS) });
     if (b.staffRoleId && guild.roles.cache.has(b.staffRoleId)) {
       out.push({ id: b.staffRoleId, allow: this._held(guild, TicketService.PARTICIPANT_FLAGS) });
     }
@@ -287,29 +260,7 @@ class TicketService {
     });
   }
 
-  // ---- channel edits ----
-
-  /**
-   * Discord allows only 2 name changes per channel per 10 minutes. discord.js waits out that
-   * limit automatically, which could stall an interaction for minutes, so we wait a short while
-   * and then let the edit finish in the background. A real API error still rejects immediately.
-   */
-  async _edit(channel, data) {
-    const pending = channel.edit(data);
-    let timer;
-    const timeout = new Promise((resolve) => {
-      timer = setTimeout(() => resolve('__timeout__'), this.opts.editTimeoutMs);
-    });
-    const result = await Promise.race([pending, timeout]);
-    clearTimeout(timer);
-    if (result === '__timeout__') {
-      pending.catch((err) => console.warn(`[35xw] delayed edit of #${channel.name} failed: ${err.message}`));
-      return { done: false };
-    }
-    return { done: true };
-  }
-
-  // ---- category ----
+  // ---- category / transcript channel ----
 
   /** The "🎫 Tickets" category. Renames a previously used category instead of making a duplicate. */
   async ensureCategory(guild) {
@@ -317,10 +268,7 @@ class TicketService {
     const wanted = this.opts.categoryName;
     let cat = b.categoryId ? guild.channels.cache.get(b.categoryId) : null;
     if (cat && cat.type !== ChannelType.GuildCategory) cat = null;
-
-    if (cat && cat.name !== wanted) {
-      await cat.setName(wanted, '35xw ticket category renamed').catch(() => {});
-    }
+    if (cat && cat.name !== wanted) await cat.setName(wanted, '35xw ticket category renamed').catch(() => {});
     if (!cat) {
       cat =
         guild.channels.cache.find(
@@ -340,6 +288,24 @@ class TicketService {
       this.storage.save();
     }
     return cat;
+  }
+
+  /** The single private transcripts channel (created on demand inside the tickets category). */
+  async ensureTranscriptChannel(guild) {
+    const name = this.opts.transcriptChannelName;
+    let ch = guild.channels.cache.find((c) => c.type === ChannelType.GuildText && c.name === name) || null;
+    if (!ch) {
+      const category = await this.ensureCategory(guild);
+      ch = await guild.channels.create({
+        name,
+        type: ChannelType.GuildText,
+        parent: category.id,
+        permissionOverwrites: this._baseOverwrites(guild),
+        topic: '📄 35xw ticket transcripts',
+        reason: '35xw transcripts channel',
+      });
+    }
+    return ch;
   }
 
   // ---- open ----
@@ -395,8 +361,6 @@ class TicketService {
         status: 'open',
         closedAt: null,
         closedBy: null,
-        transcriptAt: null,
-        transcriptChannelId: null,
       });
       this.storage.save();
 
@@ -407,163 +371,10 @@ class TicketService {
     }
   }
 
-  // ---- close / reopen / delete ----
+  // ---- transcript ----
 
-  /** Close: rename to close-NNNN, hide it from the opener, show the staff controls. */
-  async closeTicket(channel, closer) {
-    const b = this._guild(channel.guild.id);
-    const t = this.get(channel.guild.id, channel.id);
-    if (!t) return { ok: false, reason: 'not_ticket' };
-    if (t.status !== 'open') return { ok: false, reason: 'already_closed' };
-
-    // The opener loses access; @everyone is already denied so removing the overwrite hides it.
-    await channel.permissionOverwrites.delete(t.userId, 'Ticket closed').catch(() => {});
-    await this._edit(channel, { name: formatClosedName(t.number) }).catch((err) =>
-      console.warn(`[35xw] rename to ${formatClosedName(t.number)} failed: ${err.message}`),
-    );
-
-    t.status = 'closed';
-    t.closedAt = Date.now();
-    t.closedBy = closer.id;
-    setOwn(b.users, t.userId, { lastClosedAt: t.closedAt });
-    this.storage.save();
-
-    await channel.send({
-      embeds: [new EmbedBuilder().setColor(TICKET_COLORS.closed).setDescription(`🔒 Ticket closed by <@${closer.id}>`)],
-    });
-    await channel.send({
-      embeds: [new EmbedBuilder().setColor(TICKET_COLORS.blend).setDescription('**Support team ticket controls**')],
-      components: [controlsRow()],
-    });
-    return { ok: true, ticket: t };
-  }
-
-  /** Reopen a closed ticket: back to ticket-NNNN with the opener's access restored. */
-  async reopenTicket(channel, by) {
-    const t = this.get(channel.guild.id, channel.id);
-    if (!t) return { ok: false, reason: 'not_ticket' };
-    if (t.status === 'open') return { ok: false, reason: 'already_open' };
-
-    await this._edit(channel, { name: formatTicketName(t.number) }).catch((err) =>
-      console.warn(`[35xw] reopen rename failed: ${err.message}`),
-    );
-    await channel.permissionOverwrites.edit(t.userId, this._memberAllow(channel.guild), { reason: 'Ticket reopened' });
-
-    t.status = 'open';
-    t.closedAt = null;
-    t.closedBy = null;
-    this.storage.save();
-
-    await channel.send({
-      content: `<@${t.userId}>`,
-      embeds: [new EmbedBuilder().setColor(TICKET_COLORS.reopened).setDescription(`🔓 Ticket reopened by <@${by.id}>`)],
-      components: [closeRow()],
-    });
-    return { ok: true, ticket: t };
-  }
-
-  async deleteTicket(channel, by) {
-    const b = this._guild(channel.guild.id);
-    const t = this.get(channel.guild.id, channel.id);
-    if (!t) return { ok: false, reason: 'not_ticket' };
-
-    const secs = Math.round(this.opts.deleteDelayMs / 1000);
-    await channel
-      .send({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(TICKET_COLORS.deleted)
-            .setDescription(`⛔ Ticket will be deleted in **${secs} seconds** by <@${by.id}>`),
-        ],
-      })
-      .catch(() => {});
-    await sleep(this.opts.deleteDelayMs);
-
-    if (t.status === 'open') setOwn(b.users, t.userId, { lastClosedAt: Date.now() });
-    delete b.tickets[channel.id];
-    this.storage.save();
-
-    await channel.delete(`Ticket deleted by ${by.tag || by.id}`);
-    return { ok: true };
-  }
-
-  // ---- add ----
-
-  async addToTicket(channel, target) {
-    const t = this.get(channel.guild.id, channel.id);
-    if (!t) return { ok: false, reason: 'not_ticket' };
-    await channel.permissionOverwrites.edit(target.id, this._memberAllow(channel.guild), { reason: 'Added to ticket' });
-    return { ok: true };
-  }
-
-  // ---- transcripts ----
-
-  /** The Transcript-XX category that receives the next transcript channel (created on demand). */
-  async ensureTranscriptCategory(guild) {
-    const b = this._guild(guild.id);
-    const name = formatTranscriptCategory(this.opts.transcriptCategoryPrefix, b.transcript.index);
-    let cat =
-      guild.channels.cache.find(
-        (c) => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === name.toLowerCase(),
-      ) || null;
-    if (!cat) {
-      cat = await guild.channels.create({
-        name,
-        type: ChannelType.GuildCategory,
-        permissionOverwrites: this._baseOverwrites(guild),
-        reason: '35xw transcript category',
-      });
-    }
-    return cat;
-  }
-
-  /**
-   * The private transcript-NNNN channel for a ticket, inside the current Transcript-XX category.
-   * Reused if it already exists (transcript saved twice). When the category is full (Discord allows
-   * 50 channels) or creating fails, the bot advances to the next Transcript-XX and remembers it, so
-   * a full category is never re-checked.
-   */
-  async ensureTranscriptChannel(guild, ticket) {
-    const b = this._guild(guild.id);
-    const name = formatTranscriptName(ticket.number);
-
-    // Already saved before? Reuse that channel wherever it lives.
-    const existing = guild.channels.cache.find((c) => c.type === ChannelType.GuildText && c.name === name) || null;
-    if (existing) {
-      const category = existing.parentId ? guild.channels.cache.get(existing.parentId) || null : null;
-      return { channel: existing, category, created: false };
-    }
-
-    let lastErr = null;
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      if (b.transcript.count >= this.perCategory) {
-        skipTranscriptSlot(b);
-        this.storage.save();
-      }
-      const category = await this.ensureTranscriptCategory(guild);
-      try {
-        const channel = await guild.channels.create({
-          name,
-          type: ChannelType.GuildText,
-          parent: category.id,
-          permissionOverwrites: this._baseOverwrites(guild),
-          topic: `Transcript of ${formatTicketName(ticket.number)} • opened by ${ticket.username}`,
-          reason: `35xw transcript for ${formatTicketName(ticket.number)}`,
-        });
-        recordTranscriptPosted(b, this.perCategory);
-        this.storage.save();
-        return { channel, category, created: true };
-      } catch (err) {
-        lastErr = err;
-        skipTranscriptSlot(b);
-        this.storage.save();
-      }
-    }
-    throw lastErr || new Error('Could not create the transcript channel');
-  }
-
-  /** Read the whole ticket conversation (oldest first) as plain text. */
-  async buildTranscript(channel, ticket) {
+  /** Read the whole conversation, oldest first, as plain data. */
+  async fetchMessages(channel) {
     const max = this.opts.maxTranscriptMessages;
     const all = [];
     let before;
@@ -575,63 +386,107 @@ class TicketService {
       if (batch.size < 100) break;
     }
     all.sort((a, b) => a.createdTimestamp - b.createdTimestamp);
-
-    const stamp = (d) => new Date(d).toISOString().replace('T', ' ').slice(0, 19);
-    const lines = all.map((m) => {
-      const author = m.author ? m.author.tag : 'unknown';
-      let text = m.content || '';
-      if (m.embeds && m.embeds.length) {
-        const parts = m.embeds.map((e) => [e.title, e.description].filter(Boolean).join(' — ')).filter(Boolean);
-        if (parts.length) text += (text ? ' ' : '') + `[embed: ${parts.join(' | ')}]`;
-      }
-      if (m.attachments && m.attachments.size) {
-        text += (text ? ' ' : '') + `[attachments: ${[...m.attachments.values()].map((a) => a.url).join(' ')}]`;
-      }
-      return `[${stamp(m.createdTimestamp)}] ${author}: ${text}`;
-    });
-
-    const header = [
-      `35xw ticket transcript — ${formatTranscriptName(ticket.number)} (${formatTicketName(ticket.number)})`,
-      `Opened by: ${ticket.username} (${ticket.userId}) at ${stamp(ticket.openedAt)}`,
-      ticket.closedBy ? `Closed by: ${ticket.closedBy} at ${stamp(ticket.closedAt)}` : 'Status: open',
-      `Messages: ${all.length}${all.length >= max ? ' (truncated)' : ''}`,
-      '-'.repeat(60),
-      '',
-    ].join('\n');
-
-    return { text: header + lines.join('\n') + '\n', count: all.length };
+    return all.map(normalizeMessage);
   }
 
+  /** Build the HTML transcript and post it (with a summary embed) into the transcripts channel. */
+  async saveTranscript(channel, ticket, closer, closedAt) {
+    const messages = await this.fetchMessages(channel);
+    const guild = channel.guild;
+    const closerName = closer.username || closer.tag || closer.id;
+    const html = renderTranscriptHtml({
+      ticket,
+      ticketName: formatTicketName(ticket.number),
+      guildName: guild.name,
+      messages,
+      closedBy: { id: closer.id, name: closerName },
+      closedAt,
+    });
+    const file = new AttachmentBuilder(Buffer.from(html, 'utf8'), { name: `${formatTranscriptName(ticket.number)}.html` });
+    const embed = new EmbedBuilder()
+      .setColor(TICKET_COLORS.transcript)
+      .setTitle(`📄 Transcript — ${formatTicketName(ticket.number)}`)
+      .setDescription('Open the attached **.html** file in a browser to read the full conversation.')
+      .addFields(
+        { name: '🎫 Ticket', value: formatTicketName(ticket.number), inline: true },
+        { name: '👤 Opened by', value: `<@${ticket.userId}>`, inline: true },
+        { name: '🔒 Closed by', value: `<@${closer.id}>`, inline: true },
+        { name: '💬 Messages', value: String(messages.length), inline: true },
+        { name: '⏱️ Duration', value: formatSpan(closedAt - ticket.openedAt), inline: true },
+        { name: '🕒 Opened', value: `<t:${Math.floor(ticket.openedAt / 1000)}:f>`, inline: true },
+      )
+      .setFooter({ text: '35xw • tickets' })
+      .setTimestamp(closedAt);
+
+    const target = await this.ensureTranscriptChannel(guild);
+    await target.send({ embeds: [embed], files: [file] });
+    return { channel: target, count: messages.length };
+  }
+
+  // ---- close ----
+
   /**
-   * Transcript button: save the conversation as transcript-NNNN.txt into its own transcript-NNNN
-   * channel inside the current Transcript-XX category. The closed ticket channel stays where it is.
+   * Close = save the HTML transcript to the transcripts channel, then delete the ticket channel.
+   * If the transcript cannot be saved the channel is kept so nothing is lost (staff can retry).
    */
-  async transcript(channel, requester) {
+  async closeTicket(channel, closer) {
+    const b = this._guild(channel.guild.id);
     const t = this.get(channel.guild.id, channel.id);
     if (!t) return { ok: false, reason: 'not_ticket' };
+    if (t.status !== 'open') return { ok: false, reason: 'already_closed' };
+    if (this.closing.has(channel.id)) return { ok: false, reason: 'in_progress' };
+    this.closing.add(channel.id);
 
-    const { text, count } = await this.buildTranscript(channel, t);
-    const name = formatTranscriptName(t.number);
-    const file = new AttachmentBuilder(Buffer.from(text, 'utf8'), { name: `${name}.txt` });
-    const embed = new EmbedBuilder()
-      .setColor(TICKET_COLORS.open)
-      .setTitle(`📄 ${name}`)
-      .addFields(
-        { name: 'Ticket', value: formatTicketName(t.number), inline: true },
-        { name: 'Opened by', value: `<@${t.userId}>`, inline: true },
-        { name: 'Closed by', value: t.closedBy ? `<@${t.closedBy}>` : '—', inline: true },
-        { name: 'Messages', value: String(count), inline: true },
-        { name: 'Saved by', value: `<@${requester.id}>`, inline: true },
-      )
-      .setTimestamp();
+    try {
+      const secs = Math.round(this.opts.deleteDelayMs / 1000);
+      await channel
+        .send({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(TICKET_COLORS.closed)
+              .setDescription(
+                `🔒 Ticket closed by <@${closer.id}>\n📄 Saving the transcript… this channel will be deleted in **${secs} seconds**.`,
+              ),
+          ],
+        })
+        .catch(() => {});
 
-    const { channel: target, category } = await this.ensureTranscriptChannel(channel.guild, t);
-    await target.send({ embeds: [embed], files: [file] });
+      const closedAt = Date.now();
+      let saved;
+      try {
+        saved = await this.saveTranscript(channel, t, closer, closedAt);
+      } catch (err) {
+        await channel
+          .send({ content: `⚠️ Could not save the transcript (${err.message}). The ticket was **not** deleted, please try again.` })
+          .catch(() => {});
+        return { ok: false, reason: 'transcript_failed', error: err };
+      }
 
-    t.transcriptAt = Date.now();
-    t.transcriptChannelId = target.id;
-    this.storage.save();
-    return { ok: true, channel: target, category, count, fileName: `${name}.txt` };
+      t.status = 'closed';
+      t.closedAt = closedAt;
+      t.closedBy = closer.id;
+      setOwn(b.users, t.userId, { lastClosedAt: closedAt });
+      this.storage.save();
+
+      await sleep(this.opts.deleteDelayMs);
+      delete b.tickets[channel.id];
+      this.storage.save();
+      await channel.delete(`Ticket closed by ${closer.tag || closer.id}`).catch((err) =>
+        console.warn(`[35xw] could not delete ${channel.name}: ${err.message}`),
+      );
+      return { ok: true, ticket: t, transcriptChannel: saved.channel, count: saved.count };
+    } finally {
+      this.closing.delete(channel.id);
+    }
+  }
+
+  // ---- add ----
+
+  async addToTicket(channel, target) {
+    const t = this.get(channel.guild.id, channel.id);
+    if (!t) return { ok: false, reason: 'not_ticket' };
+    await channel.permissionOverwrites.edit(target.id, this._memberAllow(channel.guild), { reason: 'Added to ticket' });
+    return { ok: true };
   }
 }
 
@@ -639,18 +494,13 @@ module.exports = {
   TicketService,
   TICKET_COLORS,
   BUTTONS,
-  DISCORD_MAX_CHANNELS_PER_CATEGORY,
   formatTicketName,
-  formatClosedName,
   formatTranscriptName,
-  formatTranscriptCategory,
   defaultGuildBucket,
   evaluateOpen,
-  recordTranscriptPosted,
-  skipTranscriptSlot,
   formatDuration,
+  normalizeMessage,
   panelRow,
   panelEmbed,
   closeRow,
-  controlsRow,
 };

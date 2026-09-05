@@ -21,8 +21,7 @@ gives everyone an **auto role** on join, **remembers each member's roles** by th
 | `/b [mode]` | **manager only** | Bypass switch: while on, the manager is exempt from every limit (command cooldowns, one-open-ticket rule, ticket cooldown). `/b` toggles; `mode:on/off` sets it. Persisted across restarts. |
 | `/n` | **manager only** | Deletes **all** channels one by one and leaves a single text channel named `zavrseno`. Asks for confirmation first. |
 | `/v [staff]` | **staff** | Posts the **35xw verification** panel with a 🎫 **OPEN TICKET** button. Optionally sets the staff role. |
-| `/close` | opener / staff | Closes the current ticket (renames it to `close-NNNN`). |
-| `/open` | **staff** | Reopens a closed ticket. |
+| `/close` | opener / staff | Closes the current ticket: saves the HTML transcript, then deletes the channel. |
 | `/add` | **staff** | Adds a user or role to the current ticket. |
 | `/ping` | everyone | Bot latency. |
 
@@ -74,29 +73,23 @@ manager always can).
   stored and **never reused**.
 - A user can have **one open ticket at a time**, and must wait **10 minutes** after their ticket is
   closed before opening another (`TICKET_REOPEN_COOLDOWN_MINUTES`).
-- The ticket greets the opener with *"Please wait for your role, our moderators will be here
-  shortly."* and a 🔒 **Close** button.
-- **Close** (opener or staff) renames the channel to **`close-NNNN`**, posts *Ticket closed by
-  @user*, **removes the opener's access**, and shows the staff controls: 📄 **Transcript**,
-  🔓 **Open**, ⛔ **Delete**.
-- **Transcript** saves the whole conversation as a real transcript file, **`transcript-NNNN.txt`**
-  (same number as the ticket), into its own private channel **`transcript-NNNN`** inside the
-  **Transcript-01** category. Discord allows 50 channels per category, so when Transcript-01 is full
-  (or creating a channel fails) the bot creates **Transcript-02** and remembers it, never re-checking
-  a full category (`TRANSCRIPTS_PER_CATEGORY`, max 50). The ticket channel itself stays put as
-  `close-NNNN` so staff can Transcript and then Delete; saving twice reuses the same transcript channel.
-- **Open** brings a closed ticket back as `ticket-NNNN` and restores the opener's access;
-  **Delete** removes the channel after a short countdown.
-- `/add` gives someone access to a ticket; `/close` and `/open` mirror the buttons.
+- The ticket channel is **private**: only the opener, the staff role, admins and the bot manager can
+  see it and write in it. It greets the opener with *"Please wait for your role, our moderators will
+  be here shortly."* and a 🔒 **Close** button.
+- **Close** (opener or staff, button or `/close`) does everything in one go: it renders the whole
+  conversation as a Discord-styled **HTML transcript** (`transcript-NNNN.html`, same number as the
+  ticket, with avatars, names, timestamps, images and links), posts it into the single private
+  **`#transcripts`** channel together with an embed (🎫 ticket, 👤 opened by, 🔒 closed by,
+  💬 message count, ⏱️ duration, 🕒 opened at), and then **deletes the ticket channel** after a short
+  countdown. If the transcript cannot be saved the channel is kept so nothing is lost.
+- `/add` gives someone access to a ticket.
 
-A ticket keeps **one number for its whole life** (`ticket-0007` → `close-0007` →
-`transcript-0007` / `transcript-0007.txt`), so tickets and transcripts can never get mixed up. All
-ticket state lives in the database, so numbering, cooldowns and the current Transcript-XX slot
-survive restarts.
+A ticket keeps **one number for its whole life** (`ticket-0007` → `transcript-0007.html`), so tickets
+and transcripts can never get mixed up. All ticket state lives in the database, so numbering and
+cooldowns survive restarts.
 
-**Every server is independent.** Ticket numbers, categories, the Transcript-XX slot, cooldowns and the
-staff role are all stored per server, so each server starts at `ticket-0001` and never interferes
-with another. (Only the Steam/FiveM account pools are shared, on purpose, so the same account can
+**Every server is independent.** Ticket numbers, the category, cooldowns and the staff role are all
+stored per server, so each server starts at `ticket-0001` and never interferes with another. (Only the Steam/FiveM account pools are shared, on purpose, so the same account can
 never be handed out twice anywhere.)
 
 ### Website gated by a Discord role

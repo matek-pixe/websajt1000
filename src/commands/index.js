@@ -16,7 +16,6 @@ const modules = [
   // ticket system
   require('./verify'),
   require('./ticketClose'),
-  require('./ticketOpen'),
   require('./ticketAdd'),
   require('./ping'),
 ];
