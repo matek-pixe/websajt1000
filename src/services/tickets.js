@@ -8,6 +8,8 @@ const {
   ButtonStyle,
   ActionRowBuilder,
   AttachmentBuilder,
+  MessageType,
+  MessageReferenceType,
 } = require('discord.js');
 const { renderTranscriptHtml, formatSpan } = require('./transcriptHtml');
 
@@ -77,7 +79,18 @@ function formatDuration(ms) {
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
-/** Turn discord.js messages into the plain shape the HTML renderer understands. */
+const REPLY_TYPE = (MessageType && MessageType.Reply) ?? 19;
+const FORWARD_REF = (MessageReferenceType && MessageReferenceType.Forward) ?? 1;
+
+const plainAttachments = (coll) =>
+  coll ? [...coll.values()].map((a) => ({ name: a.name, url: a.url, contentType: a.contentType || '' })) : [];
+const plainEmbeds = (list) =>
+  (list || []).map((e) => ({ title: e.title || '', description: e.description || '' })).filter((e) => e.title || e.description);
+
+/**
+ * Turn a discord.js message into the plain shape the HTML renderer understands, including
+ * reactions, the message it replies to, a forwarded message's snapshot and the edited flag.
+ */
 function normalizeMessage(m) {
   const author = m.author || {};
   const avatar =
@@ -86,6 +99,40 @@ function normalizeMessage(m) {
   if (m.mentions && m.mentions.users) {
     for (const u of m.mentions.users.values()) mentions[u.id] = u.username;
   }
+
+  // reactions: unicode emoji by name, custom emoji by image url
+  const reactions = [];
+  if (m.reactions && m.reactions.cache) {
+    for (const r of m.reactions.cache.values()) {
+      const e = r.emoji || {};
+      let url = null;
+      if (e.id) {
+        if (typeof e.imageURL === 'function') url = e.imageURL({ extension: e.animated ? 'gif' : 'png', size: 32 });
+        else if (e.url) url = e.url;
+      }
+      reactions.push({ name: e.name || '', id: e.id || null, animated: !!e.animated, url, count: r.count || 0 });
+    }
+  }
+
+  // forward (message snapshot) vs. reply (reference to another message)
+  const ref = m.reference || null;
+  const snapshots = m.messageSnapshots;
+  const hasSnapshot = !!(snapshots && (snapshots.size > 0 || (Array.isArray(snapshots) && snapshots.length)));
+  const isForward = hasSnapshot || !!(ref && ref.type === FORWARD_REF);
+  let forwarded = null;
+  if (hasSnapshot) {
+    const s = typeof snapshots.first === 'function' ? snapshots.first() : [...snapshots.values()][0];
+    if (s) {
+      forwarded = {
+        content: s.content || '',
+        createdTimestamp: s.createdTimestamp || null,
+        attachments: plainAttachments(s.attachments),
+        embeds: plainEmbeds(s.embeds),
+      };
+    }
+  }
+  const replyTo = !isForward && ref && ref.messageId && (m.type === REPLY_TYPE || !ref.type) ? ref.messageId : null;
+
   return {
     id: m.id,
     createdTimestamp: m.createdTimestamp,
@@ -98,10 +145,12 @@ function normalizeMessage(m) {
     },
     content: m.content || '',
     mentions,
-    attachments: m.attachments ? [...m.attachments.values()].map((a) => ({ name: a.name, url: a.url, contentType: a.contentType || '' })) : [],
-    embeds: (m.embeds || [])
-      .map((e) => ({ title: e.title || '', description: e.description || '' }))
-      .filter((e) => e.title || e.description),
+    attachments: plainAttachments(m.attachments),
+    embeds: plainEmbeds(m.embeds),
+    reactions,
+    replyTo,
+    forwarded,
+    edited: !!m.editedTimestamp,
   };
 }
 

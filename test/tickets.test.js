@@ -121,6 +121,51 @@ test('normalizeMessage flattens a discord.js message into renderer data', () => 
   assert.deepEqual(out.mentions, { B: 'bob' });
   assert.equal(out.attachments[0].name, 'f.png');
   assert.equal(out.embeds.length, 1); // empty embed dropped
+  assert.deepEqual(out.reactions, []);
+  assert.equal(out.replyTo, null);
+  assert.equal(out.forwarded, null);
+  assert.equal(out.edited, false);
+});
+
+test('normalizeMessage captures reactions, replies, forwards and edits', () => {
+  const base = { createdTimestamp: 1, author: { id: 'A', username: 'a' }, attachments: new Map(), embeds: [] };
+
+  // reply (type 19) with reactions (unicode + custom) and an edit
+  const reply = normalizeMessage({
+    ...base,
+    id: 'r',
+    type: 19,
+    reference: { messageId: 'orig', type: 0 },
+    editedTimestamp: 5,
+    reactions: {
+      cache: new Map([
+        ['👍', { count: 2, emoji: { name: '👍', id: null } }],
+        ['1', { count: 1, emoji: { name: 'pepe', id: '1', animated: true, imageURL: (o) => `https://cdn/1.${o.extension}` } }],
+      ]),
+    },
+  });
+  assert.equal(reply.replyTo, 'orig');
+  assert.equal(reply.edited, true);
+  assert.deepEqual(reply.reactions, [
+    { name: '👍', id: null, animated: false, url: null, count: 2 },
+    { name: 'pepe', id: '1', animated: true, url: 'https://cdn/1.gif', count: 1 },
+  ]);
+
+  // forward: reference type 1 + a message snapshot; must NOT be treated as a reply
+  const snap = { content: 'fwd text', createdTimestamp: 9, attachments: new Map([['x', { name: 'p.png', url: 'u', contentType: 'image/png' }]]), embeds: [{ title: 'T' }] };
+  const fwd = normalizeMessage({
+    ...base,
+    id: 'f',
+    type: 0,
+    content: '',
+    reference: { messageId: 'far', type: 1 },
+    messageSnapshots: new Map([['far', snap]]),
+  });
+  assert.equal(fwd.replyTo, null);
+  assert.equal(fwd.forwarded.content, 'fwd text');
+  assert.equal(fwd.forwarded.createdTimestamp, 9);
+  assert.equal(fwd.forwarded.attachments[0].name, 'p.png');
+  assert.equal(fwd.forwarded.embeds[0].title, 'T');
 });
 
 test('close: saves the HTML transcript to the single #transcripts channel, then deletes the ticket', async () => {

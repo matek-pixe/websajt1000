@@ -74,3 +74,49 @@ test('renderTranscriptHtml: header facts, messages, escaping, attachments, bot b
   assert.ok(html.includes('src="https://cdn/x.png"'));
   assert.ok(html.includes('class="avatar placeholder">B<')); // no avatar -> initial
 });
+
+test('renderTranscriptHtml: replies, forwards, reactions and the edited tag', () => {
+  const html = renderTranscriptHtml({
+    ticket,
+    guildName: 'S',
+    closedAt: Date.UTC(2026, 0, 1, 11, 0),
+    messages: [
+      msg({ id: 'orig', content: 'the original <question>' }),
+      msg({ id: 'r1', author: { id: 'S1', name: 'staff', avatar: null }, content: 'answer', replyTo: 'orig', edited: true }),
+      msg({ id: 'r2', content: 'reply to gone', replyTo: 'missing' }),
+      msg({
+        id: 'fw',
+        content: '',
+        forwarded: {
+          content: 'forwarded **text** https://x.y/z',
+          createdTimestamp: Date.UTC(2025, 11, 31, 9, 0),
+          attachments: [{ name: 'shot.png', url: 'https://cdn/shot.png', contentType: 'image/png' }],
+          embeds: [{ title: 'E', description: '' }],
+        },
+      }),
+      msg({
+        id: 'rx',
+        content: 'nice',
+        reactions: [
+          { name: '👍', id: null, url: null, count: 3 },
+          { name: 'pepe', id: '1', url: 'https://cdn/emojis/1.png', count: 1 },
+        ],
+      }),
+    ],
+  });
+  // reply to an existing message shows author + escaped snippet
+  assert.ok(html.includes('↩️ Replying to <b>matija</b>: the original &lt;question&gt;'));
+  // reply to a message that is not in the transcript
+  assert.ok(html.includes('Replying to <i>a deleted message</i>'));
+  // edited tag
+  assert.ok(html.includes('<span class="edited">(edited)</span>'));
+  // forward block with its own content, timestamp, attachment and embed
+  assert.ok(html.includes('↪️ Forwarded · 2025-12-31 09:00 UTC'));
+  assert.ok(html.includes('forwarded <strong>text</strong> <a href="https://x.y/z"'));
+  assert.ok(html.includes('<img src="https://cdn/shot.png"'));
+  assert.ok(html.includes('embed-title">E<'));
+  // reactions: unicode emoji and custom emoji image, with counts
+  assert.ok(html.includes('<span class="reaction">👍<span class="count">3</span></span>'));
+  assert.ok(html.includes('<img src="https://cdn/emojis/1.png" alt="pepe"'));
+  assert.ok(html.includes('<span class="count">1</span>'));
+});

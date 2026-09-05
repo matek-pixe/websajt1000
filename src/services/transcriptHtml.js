@@ -53,20 +53,18 @@ function isImage(att) {
   return /^image\//i.test(att.contentType || '') || /\.(png|jpe?g|gif|webp)$/i.test(att.name || '');
 }
 
-function renderMessage(m) {
-  const a = m.author || {};
-  const avatar = a.avatar
-    ? `<img class="avatar" src="${esc(a.avatar)}" alt="" loading="lazy">`
-    : `<div class="avatar placeholder">${esc((a.name || '?').slice(0, 1).toUpperCase())}</div>`;
-  const bot = a.bot ? '<span class="badge">BOT</span>' : '';
-  const attachments = (m.attachments || [])
+function renderAttachments(list) {
+  return (list || [])
     .map((att) =>
       isImage(att)
         ? `<a class="att" href="${esc(att.url)}" target="_blank" rel="noopener"><img src="${esc(att.url)}" alt="${esc(att.name || 'image')}" loading="lazy"></a>`
         : `<a class="att file" href="${esc(att.url)}" target="_blank" rel="noopener">📎 ${esc(att.name || 'attachment')}</a>`,
     )
     .join('');
-  const embeds = (m.embeds || [])
+}
+
+function renderEmbeds(list) {
+  return (list || [])
     .map(
       (e) =>
         `<div class="embed">${e.title ? `<div class="embed-title">${esc(e.title)}</div>` : ''}${
@@ -74,8 +72,55 @@ function renderMessage(m) {
         }</div>`,
     )
     .join('');
+}
+
+/** "↩️ Replying to name: snippet" — resolved against the other messages of the transcript. */
+function renderReply(m, byId) {
+  if (!m.replyTo) return '';
+  const target = byId && byId.get(m.replyTo);
+  if (!target) return '<div class="reply">↩️ Replying to <i>a deleted message</i></div>';
+  const raw =
+    target.content ||
+    (target.forwarded && target.forwarded.content) ||
+    (target.attachments && target.attachments.length ? '📎 attachment' : '') ||
+    (target.embeds && target.embeds.length ? '📋 embed' : '') ||
+    '…';
+  const snippet = raw.length > 90 ? raw.slice(0, 90) + '…' : raw;
+  return `<div class="reply">↩️ Replying to <b>${esc((target.author && target.author.name) || 'unknown')}</b>: ${esc(snippet)}</div>`;
+}
+
+/** A forwarded message is shown as a quoted block with its own content, files and embeds. */
+function renderForward(f) {
+  if (!f) return '';
+  const when = f.createdTimestamp ? ` · ${esc(fmtTime(f.createdTimestamp))}` : '';
+  const content = f.content ? `<div class="content">${renderContent(f.content)}</div>` : '';
+  return `<div class="forward"><div class="fw-label">↪️ Forwarded${when}</div>${content}${renderAttachments(f.attachments)}${renderEmbeds(f.embeds)}</div>`;
+}
+
+function renderReactions(list) {
+  if (!list || !list.length) return '';
+  const items = list
+    .map((r) => {
+      const face = r.url ? `<img src="${esc(r.url)}" alt="${esc(r.name)}" loading="lazy">` : esc(r.name);
+      return `<span class="reaction">${face}<span class="count">${Number(r.count) || 0}</span></span>`;
+    })
+    .join('');
+  return `<div class="reactions">${items}</div>`;
+}
+
+function renderMessage(m, byId) {
+  const a = m.author || {};
+  const avatar = a.avatar
+    ? `<img class="avatar" src="${esc(a.avatar)}" alt="" loading="lazy">`
+    : `<div class="avatar placeholder">${esc((a.name || '?').slice(0, 1).toUpperCase())}</div>`;
+  const bot = a.bot ? '<span class="badge">BOT</span>' : '';
+  const edited = m.edited ? '<span class="edited">(edited)</span>' : '';
   const content = m.content ? `<div class="content">${renderContent(m.content, m.mentions)}</div>` : '';
-  return `<div class="msg">${avatar}<div class="body"><div class="head"><span class="name">${esc(a.name || 'unknown')}</span>${bot}<span class="time">${esc(fmtTime(m.createdTimestamp))}</span></div>${content}${attachments}${embeds}</div></div>`;
+  return (
+    `<div class="msg">${avatar}<div class="body">${renderReply(m, byId)}` +
+    `<div class="head"><span class="name">${esc(a.name || 'unknown')}</span>${bot}<span class="time">${esc(fmtTime(m.createdTimestamp))}</span>${edited}</div>` +
+    `${content}${renderForward(m.forwarded)}${renderAttachments(m.attachments)}${renderEmbeds(m.embeds)}${renderReactions(m.reactions)}</div></div>`
+  );
 }
 
 /**
@@ -91,7 +136,8 @@ function renderTranscriptHtml({ ticket, guildName, messages, closedBy, closedAt,
   const name = ticketName || `ticket-${String(ticket.number).padStart(4, '0')}`;
   const participants = new Set(messages.map((m) => (m.author && m.author.id) || '').filter(Boolean)).size;
   const closed = closedAt || Date.now();
-  const rows = messages.map(renderMessage).join('\n');
+  const byId = new Map(messages.map((m) => [m.id, m]));
+  const rows = messages.map((m) => renderMessage(m, byId)).join('\n');
 
   return `<!doctype html>
 <html lang="en">
@@ -125,6 +171,15 @@ function renderTranscriptHtml({ ticket, guildName, messages, closedBy, closedAt,
   .att.file { display: inline-block; margin-top: 6px; background: #2b2d31; padding: 6px 10px; border-radius: 6px; text-decoration: none; }
   .embed { border-left: 4px solid #5865f2; background: #2b2d31; padding: 8px 12px; border-radius: 4px; margin-top: 6px; max-width: 520px; }
   .embed-title { color: #fff; font-weight: 600; margin-bottom: 4px; }
+  .reply { color: #b5bac1; font-size: 13px; margin-bottom: 3px; border-left: 2px solid #4e5058; padding-left: 8px; }
+  .reply b { color: #fff; }
+  .forward { border-left: 3px solid #4e5058; background: rgba(0,0,0,.14); padding: 6px 10px; margin-top: 4px; border-radius: 4px; max-width: 640px; }
+  .fw-label { color: #949ba4; font-size: 12px; font-weight: 600; margin-bottom: 3px; }
+  .reactions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+  .reaction { display: inline-flex; align-items: center; gap: 5px; background: #2b2d31; border: 1px solid #3f4147; border-radius: 8px; padding: 2px 7px; font-size: 14px; }
+  .reaction img { width: 16px; height: 16px; }
+  .reaction .count { color: #b5bac1; font-size: 13px; }
+  .edited { color: #949ba4; font-size: 11px; }
   .footer { text-align: center; color: #949ba4; font-size: 12px; padding: 20px; border-top: 1px solid #1e1f22; }
 </style>
 </head>
