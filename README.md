@@ -20,7 +20,7 @@ gives everyone an **auto role** on join, **remembers each member's roles** by th
 | `/roles` | **staff** | Shows the roles the bot remembers for a user (`user:` or paste an `id:` of someone who left) and whether it can restore them, with the reason if not. |
 | `/refills` | **manager only** | Attach `steam.txt` to refill the Steam pool. |
 | `/refill5` | **manager only** | Attach `fivem.txt` to refill the FiveM pool. |
-| `/b [mode]` | **manager only** | Bypass switch: while on, the manager is exempt from every limit (command cooldowns, one-open-ticket rule, ticket cooldown). `/b` toggles; `mode:on/off` sets it. Persisted across restarts. |
+| `/b [user] [mode]` | **manager only** | Bypass: exempt from every limit (command cooldowns, one-open-ticket rule, ticket cooldown). `/b` toggles your own; `/b user:@someone` gives it to (or takes it from) that person; `mode:on/off` sets it explicitly; `mode:List` shows who has it. Persisted across restarts. |
 | `/n` | **manager only** | Deletes **all** channels one by one and leaves a single text channel named `zavrseno`. Asks for confirmation first. |
 | `/v [staff]` | **staff** | Posts the **35xw verification** panel with a 🎫 **OPEN TICKET** button. Optionally sets the staff role. |
 | `/close` | opener / staff | Closes the current ticket: saves the HTML transcript, then deletes the channel. |

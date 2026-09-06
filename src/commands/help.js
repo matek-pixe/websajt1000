@@ -49,7 +49,7 @@ module.exports = {
           value:
             '`/refills` + priloži `steam.txt` — napuni Steam zalihu\n' +
             '`/refill5` + priloži `fivem.txt` — napuni FiveM zalihu\n' +
-            '`/b` — bypass prekidač: dok je upaljen, za tebe ne vrijedi nijedan limit (cooldown, ticketi)\n' +
+            '`/b` — bypass prekidač za tebe (bez cooldowna i ticket limita); `/b user:@netko` daj/makni bypass nekome; `/b mode:List` tko ga ima\n' +
             '`/n` — obriši SVE kanale i ostavi samo „zavrseno" (traži potvrdu)',
         },
         {

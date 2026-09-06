@@ -28,8 +28,9 @@ function defaults() {
     // tickets.<guildId> = { counter, categoryId, staffRoleId, transcript: { index, count },
     //   tickets: { <channelId>: {...} }, users: { <userId>: { lastClosedAt } } }
     tickets: {},
-    // settings.bypass = true while the manager's /b "no limits" mode is switched on.
-    settings: { bypass: false },
+    // settings.bypass = true while the manager's /b "no limits" mode is switched on;
+    // settings.bypassUsers.<userId> = { by, at } for people the manager gave bypass to.
+    settings: { bypass: false, bypassUsers: {} },
   };
 }
 
@@ -66,6 +67,7 @@ function sanitize(data) {
   if (!isPlainObject(data.tickets)) data.tickets = {};
   if (!isPlainObject(data.settings)) data.settings = {};
   if (typeof data.settings.bypass !== 'boolean') data.settings.bypass = false;
+  if (!isPlainObject(data.settings.bypassUsers)) data.settings.bypassUsers = {};
   return data;
 }
 
