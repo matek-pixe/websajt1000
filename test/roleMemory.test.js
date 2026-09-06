@@ -80,6 +80,60 @@ test('remember persists roles keyed by guild + user id and survives a reload', (
   }
 });
 
+test('roles are remembered when a member leaves and restored when they rejoin, even across a restart', async () => {
+  const dir = tmpDir();
+  try {
+    const file = path.join(dir, 'db.json');
+    // Collection-like Map (the service uses .map/.values/.get/.has)
+    const coll = (entries) => {
+      const m = new Map(entries);
+      m.map = (fn) => [...m.values()].map(fn);
+      return m;
+    };
+    const roles = coll([
+      ['G', { id: 'G', position: 0, managed: false }],
+      ['auto', { id: 'auto', name: 'Member', position: 1, managed: false }],
+      ['low', { id: 'low', position: 2, managed: false }],
+      ['high', { id: 'high', position: 9, managed: false }], // above the bot -> cannot be restored
+    ]);
+    const me = { id: 'BOT', roles: { highest: { position: 5 } }, permissions: { has: () => true } };
+    const guild = { id: 'G', roles: { cache: roles }, members: { me, fetchMe: async () => me } };
+
+    // 1) a member holding roles leaves the server -> the bot remembers them
+    const svc1 = new RoleMemoryService(new Storage(file), { id: 'auto', name: 'Member' });
+    const leaving = {
+      id: 'U1',
+      guild,
+      partial: false,
+      user: { username: 'matija', bot: false },
+      roles: { cache: coll([['G', { id: 'G' }], ['low', { id: 'low' }], ['high', { id: 'high' }]]) },
+    };
+    assert.deepEqual(svc1.remember(leaving), ['low', 'high']);
+
+    // 2) the bot restarts -> memory comes back from disk
+    const svc2 = new RoleMemoryService(new Storage(file), { id: 'auto', name: 'Member' });
+    assert.deepEqual(svc2.getRemembered('G', 'U1'), ['low', 'high']);
+
+    // 3) the same person rejoins with no roles -> auto role + remembered roles are given back
+    const added = [];
+    const rejoining = {
+      id: 'U1',
+      guild,
+      user: { username: 'matija', bot: false },
+      roles: { cache: coll([['G', { id: 'G' }]]), add: async (ids) => added.push(Array.isArray(ids) ? ids : [ids]) },
+    };
+    const res = await svc2.applyOnJoin(rejoining);
+    assert.deepEqual(added, [['auto'], ['low']]);
+    assert.deepEqual(res.applied, ['auto', 'low']);
+    assert.deepEqual(res.skipped.aboveBot, ['high']); // reported, not silently dropped
+
+    // 4) a different person is untouched
+    assert.deepEqual(svc2.getRemembered('G', 'U2'), []);
+  } finally {
+    rm(dir);
+  }
+});
+
 test('classifyRemembered explains what can and cannot be restored; getEntry returns the record', () => {
   const dir = tmpDir();
   try {

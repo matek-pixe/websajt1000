@@ -21,10 +21,11 @@ test('parseAccounts ignores blanks, comments, BOM and in-file duplicates', () =>
   assert.equal(duplicatesInFile, 1);
 });
 
-test('formatAccount splits at the colons, one labelled line per part', () => {
-  assert.equal(formatAccount('user:pass'), '👤 Login:    user\n🔑 Password: pass');
-  assert.equal(formatAccount(' mail@x.y : p4ss : tok3n '), '👤 Login:    mail@x.y\n🔑 Password: p4ss\n🔹 Extra 1:  tok3n');
-  assert.equal(formatAccount('a:b:c:d'), '👤 Login:    a\n🔑 Password: b\n🔹 Extra 1:  c\n🔹 Extra 2:  d');
+test('formatAccount splits at the colons, one labelled line per part, e-mails recognised', () => {
+  assert.equal(formatAccount('user:pass'), '👤 Username: user\n🔑 Password: pass');
+  assert.equal(formatAccount(' mail@x.y : p4ss : tok3n '), '📧 Email:    mail@x.y\n🔑 Password: p4ss\n🔹 Extra 1:  tok3n');
+  assert.equal(formatAccount('a:b:c:d'), '👤 Username: a\n🔑 Password: b\n🔹 Extra 1:  c\n🔹 Extra 2:  d');
+  assert.equal(formatAccount('user:pw:backup@mail.com'), '👤 Username: user\n🔑 Password: pw\n📧 Email:    backup@mail.com');
   assert.equal(formatAccount('nocolon'), 'nocolon'); // untouched
 });
 

@@ -5,6 +5,7 @@ const { Collection } = require('discord.js');
 const modules = [
   require('./steam'),
   require('./fivem'),
+  require('./combo'),
   require('./refills'),
   require('./refill5'),
   require('./bypass'),

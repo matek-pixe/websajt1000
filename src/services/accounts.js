@@ -23,17 +23,26 @@ function normalizeLine(line) {
   return String(line).replace(/^\uFEFF/, '').trim();
 }
 
+const isEmail = (s) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
+
 /**
- * Pretty display of one account line: split at the colons, one part per line with a label.
- *   "user:pass"        -> "\uD83D\uDC64 Login:    user\n\uD83D\uDD11 Password: pass"
- *   "mail:pass:token"  -> ... + "\uD83D\uDD39 Extra 1:  token"
- * A line without a colon is shown as-is.
+ * Pretty display of one account line: split at the colons, one labelled part per line.
+ *   "user:pass"              -> "\uD83D\uDC64 Username: user\n\uD83D\uDD11 Password: pass"
+ *   "mail@x.y:pass:token"    -> "\uD83D\uDCE7 Email:    mail@x.y\n\uD83D\uDD11 Password: pass\n\uD83D\uDD39 Extra 1:  token"
+ * Anything that looks like an e-mail is labelled as one. A line without a colon is shown as-is.
  */
 function formatAccount(line) {
   const parts = String(line).split(':').map((s) => s.trim());
   if (parts.length < 2) return String(line);
-  const labels = ['\uD83D\uDC64 Login:   ', '\uD83D\uDD11 Password:'];
-  return parts.map((p, i) => `${labels[i] || `\uD83D\uDD39 Extra ${i - 1}: `} ${p}`).join('\n');
+  let extra = 0;
+  const row = (emoji, text, value) => `${emoji} ${text.padEnd(9)} ${value}`;
+  return parts
+    .map((p, i) => {
+      if (i === 0) return isEmail(p) ? row('\uD83D\uDCE7', 'Email:', p) : row('\uD83D\uDC64', 'Username:', p);
+      if (i === 1) return row('\uD83D\uDD11', 'Password:', p);
+      return isEmail(p) ? row('\uD83D\uDCE7', 'Email:', p) : row('\uD83D\uDD39', `Extra ${++extra}:`, p);
+    })
+    .join('\n');
 }
 
 /**

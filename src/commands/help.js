@@ -22,6 +22,7 @@ module.exports = {
           value:
             '`/steam` — dobij Steam račun (nitko ga prije nije dobio)\n' +
             '`/5m` — dobij FiveM račun (nitko ga prije nije generirao)\n' +
+            '`/combo` — dobij Steam i FiveM račun odjednom, jedan ispod drugog\n' +
             '`/stats` — Rastrošan ploča: tko je najviše potrošio\n' +
             '🎫 **OPEN TICKET** gumb — otvori ticket (jedan po osobi, 10 min pauze nakon zatvaranja)\n' +
             '`/close` — zatvori svoj ticket\n' +
