@@ -40,7 +40,8 @@ module.exports = {
           value:
             '`/aa role:@rola` — postavi rolu koju svaki novi član dobije\n' +
             '`/aa` (bez role) — pokaži koja je auto rola trenutno postavljena\n' +
-            '`/f role:@rola` — daj tu rolu SVIM članovima (samo admini); `action:Remove` je svima makne, `bots:true` uključi i botove',
+            '`/f role:@rola` — daj tu rolu SVIM članovima (samo admini); `action:Remove` je svima makne, `bots:true` uključi i botove\n' +
+            '`/roles user:@netko` ili `/roles id:123…` — što bot pamti za tu osobu (radi i za one koji su otišli) i može li to vratiti',
         },
         {
           name: '🔑 Samo menadžer',

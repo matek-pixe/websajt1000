@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const fs = require('node:fs');
 const { Storage } = require('../src/storage');
-const { AccountService, parseAccounts } = require('../src/services/accounts');
+const { AccountService, parseAccounts, formatAccount } = require('../src/services/accounts');
 const { tmpDir, rm, user } = require('./helpers');
 
 function svc() {
@@ -19,6 +19,13 @@ test('parseAccounts ignores blanks, comments, BOM and in-file duplicates', () =>
   const { accounts, duplicatesInFile } = parseAccounts('﻿a:1\n\n# comment\nb:2\r\na:1\n   c:3   ');
   assert.deepEqual(accounts, ['a:1', 'b:2', 'c:3']);
   assert.equal(duplicatesInFile, 1);
+});
+
+test('formatAccount splits at the colons, one labelled line per part', () => {
+  assert.equal(formatAccount('user:pass'), '👤 Login:    user\n🔑 Password: pass');
+  assert.equal(formatAccount(' mail@x.y : p4ss : tok3n '), '👤 Login:    mail@x.y\n🔑 Password: p4ss\n🔹 Extra 1:  tok3n');
+  assert.equal(formatAccount('a:b:c:d'), '👤 Login:    a\n🔑 Password: b\n🔹 Extra 1:  c\n🔹 Extra 2:  d');
+  assert.equal(formatAccount('nocolon'), 'nocolon'); // untouched
 });
 
 test('refill adds accounts and writes the file to disk', () => {

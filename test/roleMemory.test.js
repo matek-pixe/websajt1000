@@ -80,6 +80,39 @@ test('remember persists roles keyed by guild + user id and survives a reload', (
   }
 });
 
+test('classifyRemembered explains what can and cannot be restored; getEntry returns the record', () => {
+  const dir = tmpDir();
+  try {
+    const storage = new Storage(path.join(dir, 'db.json'));
+    const svc = new RoleMemoryService(storage, { id: '', name: 'Member' });
+    const guild = {
+      id: 'G',
+      roles: {
+        cache: new Map([
+          ['G', { id: 'G', position: 0, managed: false }],
+          ['low', { id: 'low', position: 2, managed: false }],
+          ['high', { id: 'high', position: 9, managed: false }],
+          ['boost', { id: 'boost', position: 3, managed: true }],
+        ]),
+      },
+      members: { me: { roles: { highest: { position: 5 } } } },
+    };
+    const cls = svc.classifyRemembered(guild, ['G', 'low', 'high', 'boost', 'gone']);
+    assert.deepEqual(cls, { ok: ['low'], aboveBot: ['high'], managed: ['boost'], missing: ['gone'] });
+
+    // when the bot member is unknown, nothing is assignable (position 0)
+    const clsNoMe = svc.classifyRemembered(guild, ['low'], null);
+    assert.deepEqual(clsNoMe.ok, []);
+    assert.deepEqual(clsNoMe.aboveBot, ['low']);
+
+    assert.equal(svc.getEntry('G', 'U1'), null);
+    storage.data.roles.G = { U1: { roles: ['low', 'high'], username: 'matija', updatedAt: '2026-01-01T00:00:00.000Z' } };
+    assert.deepEqual(svc.getEntry('G', 'U1'), { roles: ['low', 'high'], username: 'matija', updatedAt: '2026-01-01T00:00:00.000Z' });
+  } finally {
+    rm(dir);
+  }
+});
+
 test('forget wipes a user\'s remembered roles (used on ban)', () => {
   const dir = tmpDir();
   try {

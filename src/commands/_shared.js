@@ -1,6 +1,7 @@
 'use strict';
 
 const { EmbedBuilder, MessageFlags } = require('discord.js');
+const { formatAccount } = require('../services/accounts');
 
 const COLORS = {
   ok: 0x2ecc71,
@@ -50,7 +51,7 @@ async function giveAccount(interaction, ctx, type) {
     .setColor(COLORS.ok)
     .setTitle(`${info.emoji} Tvoj ${info.label} račun`)
     .setDescription('Ovaj račun je samo tvoj i nikada nije bio dan nikome drugom. Čuvaj ga.')
-    .addFields({ name: 'Račun', value: '```\n' + account + '\n```' })
+    .addFields({ name: 'Račun', value: '```\n' + formatAccount(account) + '\n```' })
     .setFooter({ text: `35xw • ${info.label}` })
     .setTimestamp();
 

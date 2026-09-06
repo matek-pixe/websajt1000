@@ -282,7 +282,14 @@ client.on(Events.GuildMemberAdd, async (member) => {
   if (member.user.bot) return;
   try {
     const res = await roleMemory.applyOnJoin(member);
-    console.log(`[35xw] join: ${member.user.tag} -> applied ${res.applied.length} role(s)`);
+    const sk = res.skipped || {};
+    const notes = [];
+    if (sk.aboveBot && sk.aboveBot.length) notes.push(`${sk.aboveBot.length} above my role (move my role higher!)`);
+    if (sk.managed && sk.managed.length) notes.push(`${sk.managed.length} managed by an integration`);
+    if (sk.missing && sk.missing.length) notes.push(`${sk.missing.length} deleted`);
+    console.log(
+      `[35xw] join: ${member.user.tag} -> restored ${res.applied.length} role(s)` + (notes.length ? ` | not restored: ${notes.join(', ')}` : ''),
+    );
   } catch (err) {
     console.warn(`[35xw] join handler failed for ${member.id}: ${err.message}`);
   }

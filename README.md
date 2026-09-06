@@ -16,6 +16,7 @@ gives everyone an **auto role** on join, **remembers each member's roles** by th
 | `/stats` | everyone | Posts the **Rastrošan** embed: member count + top `/steam` and top `/5m` users (separately). |
 | `/aa` | **server owner** | Sets the role every new member gets on **this** server, e.g. `/aa @Member`. Run with no role to see the current setting. |
 | `/f role` | **admins** | Gives a role to **every member** of the server (bots skipped unless `bots:true`). `action:Remove` takes it away from everyone. Shows progress and a summary. |
+| `/roles` | **staff** | Shows the roles the bot remembers for a user (`user:` or paste an `id:` of someone who left) and whether it can restore them, with the reason if not. |
 | `/refills` | **manager only** | Attach `steam.txt` to refill the Steam pool. |
 | `/refill5` | **manager only** | Attach `fivem.txt` to refill the FiveM pool. |
 | `/b [mode]` | **manager only** | Bypass switch: while on, the manager is exempt from every limit (command cooldowns, one-open-ticket rule, ticket cooldown). `/b` toggles; `mode:on/off` sets it. Persisted across restarts. |
@@ -52,7 +53,9 @@ to assign it; `/aa` warns you if it doesn't.
 - Roles are saved keyed by **guild ID + Discord user ID**, so the memory survives a member leaving
   the server entirely. It updates whenever someone's roles change and when they leave.
 - The bot only restores roles it is actually allowed to assign (not managed roles, and only roles
-  below its own highest role).
+  **below its own highest role**). If someone comes back without their roles, run `/roles` on them:
+  it lists what is remembered and flags roles that sit above the bot's role, which is the usual cause.
+  The join log prints the same breakdown.
 - **Moderation note:** a plain **kick** does not stop role memory — a kicked member who rejoins gets
   their old roles back. To permanently strip someone, **ban** them: a ban clears their remembered
   roles so a later rejoin starts clean.

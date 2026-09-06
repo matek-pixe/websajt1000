@@ -24,6 +24,19 @@ function normalizeLine(line) {
 }
 
 /**
+ * Pretty display of one account line: split at the colons, one part per line with a label.
+ *   "user:pass"        -> "\uD83D\uDC64 Login:    user\n\uD83D\uDD11 Password: pass"
+ *   "mail:pass:token"  -> ... + "\uD83D\uDD39 Extra 1:  token"
+ * A line without a colon is shown as-is.
+ */
+function formatAccount(line) {
+  const parts = String(line).split(':').map((s) => s.trim());
+  if (parts.length < 2) return String(line);
+  const labels = ['\uD83D\uDC64 Login:   ', '\uD83D\uDD11 Password:'];
+  return parts.map((p, i) => `${labels[i] || `\uD83D\uDD39 Extra ${i - 1}: `} ${p}`).join('\n');
+}
+
+/**
  * Parse the content of steam.txt / fivem.txt.
  * One account per line (any format, e.g. `login:password`). Blank lines and lines
  * starting with `#` are ignored. Duplicate lines inside the same file count once.
@@ -196,4 +209,4 @@ class AccountService {
   }
 }
 
-module.exports = { AccountService, POOL_TYPES, parseAccounts };
+module.exports = { AccountService, POOL_TYPES, parseAccounts, formatAccount };

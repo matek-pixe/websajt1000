@@ -85,6 +85,36 @@ class RoleMemoryService {
     return Array.isArray(entry.roles) ? entry.roles.slice() : [];
   }
 
+  /** The full remembered entry { roles, username, updatedAt } or null if we never saw the user. */
+  getEntry(guildId, userId) {
+    const bucket = this.storage.data.roles[guildId];
+    if (!bucket || !hasOwn(bucket, userId)) return null;
+    const e = bucket[userId] || {};
+    return {
+      roles: Array.isArray(e.roles) ? e.roles.slice() : [],
+      username: e.username || null,
+      updatedAt: e.updatedAt || null,
+    };
+  }
+
+  /**
+   * Sort remembered role ids into what the bot can restore and why the rest cannot be restored.
+   * Used on join (for a clear log) and by /roles (so admins can see the reason themselves).
+   */
+  classifyRemembered(guild, roleIds, me = guild.members.me) {
+    const botHighest = me && me.roles && me.roles.highest ? me.roles.highest.position : 0;
+    const out = { ok: [], aboveBot: [], managed: [], missing: [] };
+    for (const id of roleIds) {
+      if (id === guild.id) continue;
+      const role = guild.roles.cache.get(id);
+      if (!role) out.missing.push(id);
+      else if (role.managed) out.managed.push(id);
+      else if (role.position >= botHighest) out.aboveBot.push(id);
+      else out.ok.push(id);
+    }
+    return out;
+  }
+
   /** The role id the server owner chose for this guild via /aa (null if none set). */
   getGuildAutoRole(guildId) {
     const map = this.storage.data.autoRoles;
@@ -130,9 +160,8 @@ class RoleMemoryService {
    * not managed, and positioned below the bot member's highest role.
    * @param {import('discord.js').Guild} guild
    */
-  static assignableRoleIds(guild) {
-    const me = guild.members.me;
-    const botHighest = me ? me.roles.highest.position : 0;
+  static assignableRoleIds(guild, me = guild.members.me) {
+    const botHighest = me && me.roles && me.roles.highest ? me.roles.highest.position : 0;
     const ids = new Set();
     for (const role of guild.roles.cache.values()) {
       if (role.id === guild.id) continue;
@@ -232,8 +261,9 @@ class RoleMemoryService {
    */
   async applyOnJoin(member) {
     const guild = member.guild;
+    // The bot's own member is needed for the role-hierarchy check; make sure it is available.
+    const me = guild.members.me || (await guild.members.fetchMe().catch(() => null));
     const autoRole = await this.ensureAutoRole(guild);
-    const assignable = RoleMemoryService.assignableRoleIds(guild);
     const autoRoleId = autoRole ? autoRole.id : null;
     const applied = [];
 
@@ -248,23 +278,24 @@ class RoleMemoryService {
       }
     }
 
-    // Restore remembered roles the bot can actually assign, in a separate call.
-    const remembered = rolesToApplyOnJoin({
-      remembered: this.getRemembered(guild.id, member.id),
-      autoRoleId,
-      assignableRoleIds: assignable,
-    }).filter((id) => id !== autoRoleId && !member.roles.cache.has(id));
+    // Restore remembered roles the bot can actually assign, in a separate call, and report the rest.
+    const cls = this.classifyRemembered(guild, this.getRemembered(guild.id, member.id), me);
+    const toRestore = cls.ok.filter((id) => id !== autoRoleId && !member.roles.cache.has(id));
 
-    if (remembered.length > 0) {
+    if (toRestore.length > 0) {
       try {
-        await member.roles.add(remembered, '35xw remembered roles');
-        applied.push(...remembered);
+        await member.roles.add(toRestore, '35xw remembered roles');
+        applied.push(...toRestore);
       } catch (err) {
         console.warn(`[roles] Failed to restore remembered roles for ${member.id} in ${guild.id}: ${err.message}`);
       }
     }
 
-    return { applied, autoRoleId };
+    return {
+      applied,
+      autoRoleId,
+      skipped: { aboveBot: cls.aboveBot, managed: cls.managed, missing: cls.missing },
+    };
   }
 }
 

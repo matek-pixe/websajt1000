@@ -12,6 +12,7 @@ const modules = [
   require('./stats'),
   require('./autorole'),
   require('./massrole'),
+  require('./roles'),
   require('./help'),
   // ticket system
   require('./verify'),
