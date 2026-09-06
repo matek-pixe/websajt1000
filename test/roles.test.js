@@ -61,13 +61,12 @@ test('/roles: shows remembered roles for someone who left, split by restorable /
   try {
     const storage = new Storage(path.join(dir, 'db.json'));
     const roleMemory = new RoleMemoryService(storage, { id: '', name: 'Member' });
-    storage.data.roles.G = { LEFT: { roles: ['low', 'high', 'gone'], username: 'matija', updatedAt: '2026-01-01T00:00:00.000Z' } };
+    const LEFT = '123456789012345678'; // a real-looking snowflake of someone who already left
+    storage.data.roles.G = { [LEFT]: { roles: ['low', 'high', 'gone'], username: 'matija', updatedAt: '2026-01-01T00:00:00.000Z' } };
     const ctx = { isManager: () => false, roleMemory, refundCooldown() {} };
 
     // by pasted id, user not in the server anymore
-    const i = fakeInteraction({ user: 'A', member: admin, guild: fakeGuild([]), id: 'LEFT'.padEnd(16, '1') });
-    // the id must look like a snowflake; remap our test key
-    storage.data.roles.G[i.options.getString()] = storage.data.roles.G.LEFT;
+    const i = fakeInteraction({ user: 'A', member: admin, guild: fakeGuild([]), id: LEFT });
     await roles.execute(i, ctx);
     const embed = i._st.replies[0].embeds[0].toJSON();
     assert.ok(embed.description.includes('not in the server'));
