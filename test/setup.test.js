@@ -131,6 +131,7 @@ function currentServer() {
       { id: VERIFIED, name: 'Verified', position: 5 },
       { id: SENSITIVE, name: 'Admin', position: 20 },
       { name: 'Member', position: 2 },
+      { id: 'vip', name: 'vip', position: 3 },
     ],
     channels: [
       { id: 'site', name: '35xw.top', type: T.GuildAnnouncement },
@@ -234,8 +235,12 @@ test('/setup on the current server: adopts what exists, creates the rest, fixes 
     assert.ok(roleNames.includes('✅ ıl VERIFIED'));
     assert.ok(roleNames.includes('🎫 ıl TICKET SUPPORT'));
     assert.ok(roleNames.includes('👑 ıl CO-OWNER'));
+    assert.ok(roleNames.includes('🤝 ıl FRIEND'));
+    assert.ok(roleNames.includes('💎 ıl VIP'));
     assert.ok(roleNames.includes('Admin'));
     assert.ok(roleNames.includes(BLANK_ROLE_NAME));
+    assert.equal(g.roles.cache.get('vip').name, '💎 ıl VIP'); // adopted + restyled, not duplicated
+    assert.equal([...g.roles.cache.values()].filter((r) => /vip/i.test(r.name)).length, 1);
     const blank = [...g.roles.cache.values()].find((r) => r.name === BLANK_ROLE_NAME);
     assert.equal(blank.hoist, false);
     const staffId = tickets.getStaffRole('G');
@@ -370,7 +375,7 @@ test('/setup on an empty server creates the full layout and warns when the auto 
     assert.deepEqual(names(g), expected);
     // roles created because none of the ids exist here
     const roleNames = [...g.roles.cache.values()].map((r) => r.name).sort();
-    assert.deepEqual(roleNames, ['✅ ıl VERIFIED', '🎫 ıl TICKET SUPPORT', '👑 ıl CO-OWNER', '🔐 ıl OSJETLJIVO', BLANK_ROLE_NAME].sort());
+    assert.deepEqual(roleNames, ['✅ ıl VERIFIED', '🎫 ıl TICKET SUPPORT', '👑 ıl CO-OWNER', '🤝 ıl FRIEND', '💎 ıl VIP', '🔐 ıl OSJETLJIVO', BLANK_ROLE_NAME].sort());
 
     const verified = [...g.roles.cache.values()].find((r) => r.name === '✅ ıl VERIFIED');
     roleMemory.setGuildAutoRole('G', verified.id, { id: 'OWNER', username: 'o' });

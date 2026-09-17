@@ -118,7 +118,7 @@ Roles: it uses the VERIFIED and sensitive roles from `.env` (`SETUP_VERIFIED_ROL
 `SETUP_SENSITIVE_ROLE_ID`) when they exist on the server, otherwise the ones you pass as options
 (`/setup verified:@Role staff:@Role coowner:@Role sensitive:@Role`), otherwise it creates them:
 `✅ ıl VERIFIED`, `🎫 ıl TICKET SUPPORT` (also becomes the ticket staff role), `👑 ıl CO-OWNER`,
-plus a **blank role** (invisible name, not shown separately from members). Managed roles are renamed
+`🤝 ıl FRIEND`, `💎 ıl VIP`, plus a **blank role** (invisible name, not shown separately from members). Managed roles are renamed
 to the same style unless you pass `style_roles:false`; the sensitive role is never renamed.
 
 The bot needs **Administrator** (or Manage Channels + Manage Roles) and its role must sit above the

@@ -39,6 +39,9 @@ const ROLE_SPECS = Object.freeze({
   verified: { name: STYLE('✅', 'VERIFIED'), color: 0x57f287, match: ['verified', 'verify', 'verificiran', 'verificirani'] },
   staff: { name: STYLE('🎫', 'TICKET SUPPORT'), color: 0x5865f2, match: ['ticketsupport', 'support', 'staff', 'ticketstaff'] },
   coowner: { name: STYLE('👑', 'CO-OWNER'), color: 0xf1c40f, match: ['coowner', 'suvlasnik'] },
+  // Plain member tiers: they just have to exist (no channel permissions attached).
+  friend: { name: STYLE('🤝', 'FRIEND'), color: 0x3498db, match: ['friend', 'friends', 'prijatelj', 'prijatelji'] },
+  vip: { name: STYLE('💎', 'VIP'), color: 0xe91e63, match: ['vip', 'vips'] },
   // The sensitive role is whatever the owner already uses for admin-only things: never renamed.
   sensitive: { name: STYLE('🔐', 'OSJETLJIVO'), color: 0xe74c3c, match: ['osjetljivo', 'sensitive'], noRename: true },
   blank: { name: BLANK_ROLE_NAME, color: null, match: [], blank: true },
@@ -359,6 +362,8 @@ class SetupService {
       ['verified', { optionRole: opts.verified, configId: cfg.verifiedRoleId }],
       ['staff', { optionRole: opts.staff, fallbackId: this.tickets.getStaffRole(guild.id) }],
       ['coowner', { optionRole: opts.coowner }],
+      ['friend', {}],
+      ['vip', {}],
       ['sensitive', { optionRole: opts.sensitive, configId: cfg.sensitiveRoleId }],
       ['blank', {}],
     ];
