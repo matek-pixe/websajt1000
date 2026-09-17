@@ -18,6 +18,7 @@ function renderLeaderboard(top) {
 
 module.exports = {
   managerOnly: false,
+  requiresVerified: true, // only members holding the VERIFIED role (given after a ticket)
   data: new SlashCommandBuilder()
     .setName('stats')
     .setDescription('Prikaži "Rastrošan" statistiku servera i najveće potrošače.'),

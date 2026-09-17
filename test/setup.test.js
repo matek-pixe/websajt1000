@@ -407,7 +407,7 @@ test('/setup refuses without Manage Channels + Manage Roles and while another ru
   }
 });
 
-test('/setup command: only owner/admin/manager; reports the summary embed', async () => {
+test('/setup command: only the owner or the manager; reports the summary embed', async () => {
   const dir = tmpDir();
   try {
     const { setup } = mkServices(dir);
@@ -444,10 +444,70 @@ test('/setup command: only owner/admin/manager; reports the summary embed', asyn
     assert.ok(e.fields.some((f) => f.name.startsWith('✅ Napravljeno')));
     assert.ok(e.fields.some((f) => f.name.startsWith('ℹ️ Napomene')));
 
+    // admins may NOT run it any more; the manager still can
     const c = mk('ADMIN', [P.Administrator]);
     await cmd.execute(c.it, c.ctx);
-    assert.ok(c.st.deferred);
+    assert.equal(c.st.deferred, undefined);
+    assert.match(c.st.replies[0].content, /vlasnik/);
+    const d = mk('MGR');
+    await cmd.execute(d.it, d.ctx);
+    assert.ok(d.st.deferred);
   } finally {
     rm(dir);
+  }
+});
+
+test('verifiedGate: VERIFIED role, owner, admins, manager and bypass pass; everyone else is sent to the verify channel', async () => {
+  const dir = tmpDir();
+  try {
+    const { setup } = mkServices(dir);
+    const g = mkGuild(currentServer());
+    const member = (roles = [], perms = []) => ({ roles: { cache: new Set(roles) }, permissions: { has: (p) => perms.includes(p) } });
+    const opts = { isManager: (u) => u.id === 'MGR', isBypass: (u) => u.id === 'BYP' };
+
+    // before /setup: the .env role id exists on this server, so the gate is already active
+    assert.equal(setup.getVerifiedRoleId(g), VERIFIED);
+    let r = setup.verifiedGate(g, member([]), { id: 'U1' }, opts);
+    assert.equal(r.ok, false);
+    assert.equal(r.roleId, VERIFIED);
+    assert.equal(r.channelId, null); // no verify channel known yet
+    assert.equal(setup.verifiedGate(g, member([VERIFIED]), { id: 'U1' }, opts).ok, true);
+    assert.equal(setup.verifiedGate(g, member([]), { id: 'OWNER' }, opts).ok, true);
+    assert.equal(setup.verifiedGate(g, member([]), { id: 'MGR' }, opts).ok, true);
+    assert.equal(setup.verifiedGate(g, member([]), { id: 'BYP' }, opts).ok, true);
+    assert.equal(setup.verifiedGate(g, member([], [P.Administrator]), { id: 'U2' }, opts).ok, true);
+    assert.equal(setup.verifiedGate(g, member([], [P.ManageGuild]), { id: 'U2' }, opts).ok, true);
+
+    // after /setup the denial points at the verify channel
+    await setup.run(g, {});
+    r = setup.verifiedGate(g, member([]), { id: 'U1' }, opts);
+    assert.equal(r.ok, false);
+    assert.equal(r.channelId, 'ticket');
+
+    // a server with no known VERIFIED role stays open
+    const g2 = mkGuild({});
+    assert.equal(setup.getVerifiedRoleId(g2), null);
+    assert.equal(setup.verifiedGate(g2, member([]), { id: 'U1' }, opts).ok, true);
+    // ...until /setup creates one there
+    await setup.run(g2, {});
+    assert.ok(setup.getVerifiedRoleId(g2));
+    assert.equal(setup.verifiedGate(g2, member([]), { id: 'U1' }, opts).ok, false);
+  } finally {
+    rm(dir);
+  }
+});
+
+test('command flags: verified-only for the account commands, owner-only for /n and /setup', () => {
+  const { commands } = require('../src/commands');
+  for (const n of ['steam', '5m', 'combo', 'stats', 'help', 'ping']) {
+    assert.equal(commands.get(n).requiresVerified, true, n);
+    assert.ok(!commands.get(n).ownerOnly, n);
+  }
+  for (const n of ['n', 'setup']) {
+    assert.equal(commands.get(n).ownerOnly, true, n);
+    assert.equal(commands.get(n).managerOnly, false, n);
+  }
+  for (const n of ['v', 'close', 'add', 'aa', 'f', 'roles', 'b', 'refills', 'refill5']) {
+    assert.ok(!commands.get(n).requiresVerified, n);
   }
 });

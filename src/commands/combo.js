@@ -12,7 +12,7 @@ const ORDER = ['steam', 'fivem'];
  */
 module.exports = {
   managerOnly: false,
-  allowDM: true,
+  requiresVerified: true, // only members holding the VERIFIED role (given after a ticket)
   data: new SlashCommandBuilder().setName('combo').setDescription('Dobij Steam i FiveM račun odjednom.'),
 
   async execute(interaction, ctx) {

@@ -269,6 +269,43 @@ class SetupService {
     return this.running.has(guildId);
   }
 
+  /** The VERIFIED role of a guild: what /setup adopted or created, else the .env default if it exists there. */
+  getVerifiedRoleId(guild) {
+    if (!guild || !guild.roles || !guild.roles.cache) return null;
+    const all = this.storage.data.setup;
+    const stored = hasOwn(all, guild.id) && all[guild.id].roles ? all[guild.id].roles.verified : null;
+    if (stored && guild.roles.cache.has(stored)) return stored;
+    const cfg = this.config.setup && this.config.setup.verifiedRoleId;
+    if (cfg && guild.roles.cache.has(cfg)) return cfg;
+    return null;
+  }
+
+  /** The channel with the verification panel, if /setup has been run here. */
+  getVerifyChannelId(guild) {
+    const all = this.storage.data.setup;
+    const id = hasOwn(all, guild.id) && all[guild.id].channels ? all[guild.id].channels.verify_ch : null;
+    return id && guild.channels && guild.channels.cache && guild.channels.cache.has(id) ? id : null;
+  }
+
+  /**
+   * May this member use a "verified members only" command?
+   * Passes: the manager, anyone with bypass, the server owner, admins (Administrator / Manage Server)
+   * and everyone holding the VERIFIED role. A server with no known VERIFIED role stays open.
+   * Returns { ok: true } or { ok: false, roleId, channelId }.
+   */
+  verifiedGate(guild, member, user, { isManager = () => false, isBypass = () => false } = {}) {
+    if (!guild) return { ok: false, roleId: null, channelId: null };
+    if (user && (isManager(user) || isBypass(user))) return { ok: true };
+    if (user && guild.ownerId === user.id) return { ok: true };
+    const roleId = this.getVerifiedRoleId(guild);
+    if (!roleId) return { ok: true };
+    const perms = member && member.permissions;
+    if (perms && typeof perms.has === 'function' && (perms.has(P.Administrator) || perms.has(P.ManageGuild))) return { ok: true };
+    const roles = member && member.roles && member.roles.cache;
+    if (roles && typeof roles.has === 'function' && roles.has(roleId)) return { ok: true };
+    return { ok: false, roleId, channelId: this.getVerifyChannelId(guild) };
+  }
+
   _held(guild) {
     const me = guild.members.me;
     const perms = me && me.permissions && typeof me.permissions.has === 'function' ? me.permissions : null;

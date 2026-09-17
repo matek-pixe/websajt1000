@@ -10,27 +10,32 @@ gives everyone an **auto role** on join, **remembers each member's roles** by th
 
 | Command | Who | What it does |
 | --- | --- | --- |
-| `/steam` | everyone | Gives you one Steam account that has **never** been given to anyone on the server. |
-| `/5m` | everyone | Gives you one FiveM account that **no one** has ever generated. |
-| `/combo` | everyone | Gives you one Steam **and** one FiveM account together, one below the other, each split into labelled lines (username / e-mail / password / extra). |
-| `/help` | everyone | Lists every command and how to use it. |
-| `/stats` | everyone | Posts the **Rastrošan** embed: member count + top `/steam` and top `/5m` users (separately). |
-| `/setup` | **owner / admins** | Builds (or repairs) the whole server layout in one go — see *Server setup* below. Re-runnable, never deletes anything. |
+| `/steam` | **verified** | Gives you one Steam account that has **never** been given to anyone on the server. |
+| `/5m` | **verified** | Gives you one FiveM account that **no one** has ever generated. |
+| `/combo` | **verified** | Gives you one Steam **and** one FiveM account together, one below the other, each split into labelled lines (username / e-mail / password / extra). |
+| `/help` | **verified** | Lists every command and how to use it. |
+| `/stats` | **verified** | Posts the **Rastrošan** embed: member count + top `/steam` and top `/5m` users (separately). |
+| `/setup` | **server owner** | Builds (or repairs) the whole server layout in one go — see *Server setup* below. Re-runnable, never deletes anything. |
 | `/aa` | **server owner** | Sets the role every new member gets on **this** server, e.g. `/aa @Member`. Run with no role to see the current setting. |
 | `/f role` | **admins** | Gives a role to **every member** of the server (bots skipped unless `bots:true`). `action:Remove` takes it away from everyone. Shows progress and a summary. |
 | `/roles` | **staff** | Shows the roles the bot remembers for a user (`user:` or paste an `id:` of someone who left) and whether it can restore them, with the reason if not. |
 | `/refills` | **manager only** | Attach `steam.txt` to refill the Steam pool. |
 | `/refill5` | **manager only** | Attach `fivem.txt` to refill the FiveM pool. |
 | `/b [user] [mode]` | **manager only** | Bypass: exempt from every limit (command cooldowns, one-open-ticket rule, ticket cooldown). `/b` toggles your own; `/b user:@someone` gives it to (or takes it from) that person; `mode:on/off` sets it explicitly; `mode:List` shows who has it. Persisted across restarts. |
-| `/n` | **manager only** | Deletes **all** channels one by one and leaves a single text channel named `zavrseno`. Asks for confirmation first. |
+| `/n` | **server owner** | Deletes **all** channels one by one and leaves a single text channel named `zavrseno`. Asks for confirmation first. |
 | `/v [staff]` | **staff** | Posts the **35xw verification** panel with a 🎫 **OPEN TICKET** button. Optionally sets the staff role. |
 | `/close` | opener / staff | Closes the current ticket: saves the HTML transcript, then deletes the channel. |
 | `/add` | **staff** | Adds a user or role to the current ticket. |
-| `/ping` | everyone | Bot latency. |
+| `/ping` | **verified** | Bot latency. |
 
+- **verified** = members holding the VERIFIED role (the role staff hands out after a ticket; see
+  `/setup`). The manager, people with bypass, the server owner and admins always pass. On a server
+  where no VERIFIED role is known yet (no `/setup`, and the `.env` id does not exist there) those
+  commands stay open to everyone.
+- **server owner** commands (`/n`, `/setup`) also work for the manager, but for no admin.
 - Every command has a **30‑second cooldown per user** (configurable via `COOLDOWN_SECONDS`).
 - Account replies are **ephemeral** – only the person who ran the command can see the account.
-- The **manager** is the only person allowed to refill accounts or run `/n`. The manager is
+- The **manager** is the only person allowed to refill accounts or hand out bypass. The manager is
   identified by their Discord **user ID** (`1143659003327553556`, username `35bf`), which cannot
   be spoofed by changing a nickname.
 

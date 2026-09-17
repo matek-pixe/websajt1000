@@ -58,12 +58,17 @@ function isManager(user) {
   return user && user.id === config.manager.id;
 }
 
+function isOwnerOrManager(interaction) {
+  return isManager(interaction.user) || !!(interaction.guild && interaction.guild.ownerId === interaction.user.id);
+}
+
 /** Build the per-interaction context passed to command handlers. */
 function contextFor(interaction) {
   const key = `${interaction.commandName || interaction.customId}:${interaction.user.id}`;
   return {
     ...services,
     isManager,
+    isOwnerOrManager: () => isOwnerOrManager(interaction),
     /** true when this user is the manager and /b bypass is on -> no limits at all */
     isBypass: (user) => bypass.applies(user),
     cooldownKey: key,
@@ -226,7 +231,8 @@ async function handleCommand(interaction) {
 
   const ctx = contextFor(interaction);
 
-  if (!command.allowDM && !interaction.inGuild()) {
+  // Verified-only commands must run on a server, where roles can be checked.
+  if ((!command.allowDM || command.requiresVerified) && !interaction.inGuild()) {
     return interaction.reply({ content: '⚠️ Ovu komandu možeš koristiti samo na serveru.', flags: MessageFlags.Ephemeral });
   }
 
@@ -235,6 +241,26 @@ async function handleCommand(interaction) {
       content: `⛔ Samo menadžer (**${config.manager.username}**) smije koristiti \`/${interaction.commandName}\`.`,
       flags: MessageFlags.Ephemeral,
     });
+  }
+
+  // Owner-only commands (/n, /setup): the server owner, plus the manager.
+  if (command.ownerOnly && !isOwnerOrManager(interaction)) {
+    return interaction.reply({
+      content: `⛔ Samo **vlasnik servera** smije koristiti \`/${interaction.commandName}\`.`,
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  // Commands "for everyone" are really for verified members: the role handed out after a ticket.
+  if (command.requiresVerified) {
+    const gate = setup.verifiedGate(interaction.guild, interaction.member, interaction.user, { isManager, isBypass: (u) => bypass.applies(u) });
+    if (!gate.ok) {
+      const where = gate.channelId ? ` Otvori ticket u <#${gate.channelId}>` : ' Otvori ticket';
+      return interaction.reply({
+        content: `⛔ Ova komanda je samo za **verificirane** članove.${where} da dobiješ rolu <@&${gate.roleId}>.`,
+        flags: MessageFlags.Ephemeral,
+      });
+    }
   }
 
   // Commands flagged noCooldown skip the limit, and so does the manager while /b bypass is on.

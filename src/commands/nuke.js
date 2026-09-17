@@ -2,6 +2,7 @@
 
 const {
   SlashCommandBuilder,
+  PermissionFlagsBits,
   ChannelType,
   EmbedBuilder,
   ButtonBuilder,
@@ -107,11 +108,13 @@ async function performNuke(interaction, ctx) {
 }
 
 module.exports = {
-  managerOnly: true,
+  managerOnly: false,
+  ownerOnly: true, // the server owner (and the manager); no admin may run this
   buttonPrefix: 'n:',
   data: new SlashCommandBuilder()
     .setName('n')
-    .setDescription('MENADŽER: obriši SVE kanale i ostavi samo jedan tekstualni kanal "zavrseno".'),
+    .setDescription('VLASNIK: obriši SVE kanale i ostavi samo jedan tekstualni kanal "zavrseno".')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
   async execute(interaction, ctx) {
     const confirm = new ButtonBuilder()
@@ -142,8 +145,8 @@ module.exports = {
 
   /** Handle the confirm / cancel buttons. */
   async handleButton(interaction, ctx) {
-    if (!ctx.isManager(interaction.user)) {
-      return interaction.reply({ content: '⛔ Samo menadžer smije koristiti ovo.', flags: MessageFlags.Ephemeral });
+    if (!ctx.isOwnerOrManager()) {
+      return interaction.reply({ content: '⛔ Samo vlasnik servera smije koristiti ovo.', flags: MessageFlags.Ephemeral });
     }
 
     if (interaction.customId === 'n:cancel') {

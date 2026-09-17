@@ -6,7 +6,7 @@ const { COLORS } = require('./_shared');
 /** /help — list every command and how to use it. */
 module.exports = {
   managerOnly: false,
-  allowDM: true,
+  requiresVerified: true, // only members holding the VERIFIED role (given after a ticket)
   data: new SlashCommandBuilder()
     .setName('help')
     .setDescription('Prikaži sve komande bota 35xw i kako se koriste.'),
@@ -18,7 +18,7 @@ module.exports = {
       .setDescription('Upiši `/` u chat pa ti Discord sam ponudi ove komande i njihova polja.')
       .addFields(
         {
-          name: '🎮 Za sve',
+          name: '🎮 Za verificirane (rola nakon ticketa)',
           value:
             '`/steam` — dobij Steam račun (nitko ga prije nije dobio)\n' +
             '`/5m` — dobij FiveM račun (nitko ga prije nije generirao)\n' +
@@ -39,7 +39,6 @@ module.exports = {
         {
           name: '⚙️ Vlasnik servera / admini',
           value:
-            '`/setup` — složi cijeli server odjednom: VERIFY kanal s panelom, tickete, GENERAL + VOICE (samo verificirani), PRIV kanali (vlasnik + co-owner), OSJETLJIVO (samo jedna rola), 35xw.top kanal; može se ponavljati, ništa ne briše\n' +
             '`/aa role:@rola` — postavi rolu koju svaki novi član dobije\n' +
             '`/aa` (bez role) — pokaži koja je auto rola trenutno postavljena\n' +
             '`/f role:@rola` — daj tu rolu SVIM članovima (samo admini); `action:Remove` je svima makne, `bots:true` uključi i botove\n' +
@@ -50,13 +49,19 @@ module.exports = {
           value:
             '`/refills` + priloži `steam.txt` — napuni Steam zalihu\n' +
             '`/refill5` + priloži `fivem.txt` — napuni FiveM zalihu\n' +
-            '`/b` — bypass prekidač za tebe (bez cooldowna i ticket limita); `/b user:@netko` daj/makni bypass nekome; `/b mode:List` tko ga ima\n' +
+            '`/b` — bypass prekidač za tebe (bez cooldowna i ticket limita); `/b user:@netko` daj/makni bypass nekome; `/b mode:List` tko ga ima',
+        },
+        {
+          name: '👑 Samo vlasnik servera',
+          value:
+            '`/setup` — složi ili popravi cijeli server (vidi gore)\n' +
             '`/n` — obriši SVE kanale i ostavi samo „zavrseno" (traži potvrdu)',
         },
         {
           name: 'ℹ️ Dobro je znati',
           value:
             `• Svaka komanda ima pauzu od **${Math.round(ctx.config.cooldownMs / 1000)}s**.\n` +
+            '• Komande za račune i /stats rade tek kad dobiješ rolu VERIFIED (otvori ticket).\n' +
             '• Računi ti stižu privatno (samo ti ih vidiš).\n' +
             '• Ban briše zapamćene role; običan kick ih vrati kad se član vrati.',
         },

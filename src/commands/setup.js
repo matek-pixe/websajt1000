@@ -26,6 +26,7 @@ function fields(name, lines) {
  */
 module.exports = {
   managerOnly: false,
+  ownerOnly: true, // the server owner (and the manager); admins may not reshape the server
   data: new SlashCommandBuilder()
     .setName('setup')
     .setDescription('Složi cijeli server: verify, ticketi, general, voice, priv, osjetljivo, role. Ponovljivo.')
@@ -38,12 +39,10 @@ module.exports = {
 
   async execute(interaction, ctx) {
     const guild = interaction.guild;
-    const member = interaction.member;
     const isOwner = guild.ownerId === interaction.user.id;
-    const isAdmin = !!(member && member.permissions && member.permissions.has && member.permissions.has(PermissionFlagsBits.Administrator));
-    if (!isOwner && !isAdmin && !ctx.isManager(interaction.user)) {
+    if (!isOwner && !ctx.isManager(interaction.user)) {
       ctx.refundCooldown();
-      return ephemeral(interaction, '⛔ Samo **vlasnik servera** ili **administrator** može pokrenuti `/setup`.');
+      return ephemeral(interaction, '⛔ Samo **vlasnik servera** može pokrenuti `/setup`.');
     }
     if (ctx.setup.isRunning(guild.id)) {
       ctx.refundCooldown();

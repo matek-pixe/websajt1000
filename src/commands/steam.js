@@ -5,7 +5,7 @@ const { giveAccount } = require('./_shared');
 
 module.exports = {
   managerOnly: false,
-  allowDM: true,
+  requiresVerified: true, // only members holding the VERIFIED role (given after a ticket)
   data: new SlashCommandBuilder()
     .setName('steam')
     .setDescription('Dobij Steam račun koji nikada nije bio dan nikome na serveru.'),
