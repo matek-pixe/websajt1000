@@ -39,6 +39,7 @@ module.exports = {
         {
           name: '⚙️ Vlasnik servera / admini',
           value:
+            '`/setup` — složi cijeli server odjednom: VERIFY kanal s panelom, tickete, GENERAL + VOICE (samo verificirani), PRIV kanali (vlasnik + co-owner), OSJETLJIVO (samo jedna rola), 35xw.top kanal; može se ponavljati, ništa ne briše\n' +
             '`/aa role:@rola` — postavi rolu koju svaki novi član dobije\n' +
             '`/aa` (bez role) — pokaži koja je auto rola trenutno postavljena\n' +
             '`/f role:@rola` — daj tu rolu SVIM članovima (samo admini); `action:Remove` je svima makne, `bots:true` uključi i botove\n' +

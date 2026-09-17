@@ -31,6 +31,9 @@ function defaults() {
     // settings.bypass = true while the manager's /b "no limits" mode is switched on;
     // settings.bypassUsers.<userId> = { by, at } for people the manager gave bypass to.
     settings: { bypass: false, bypassUsers: {} },
+    // setup.<guildId> = { roles: { verified, staff, coowner, sensitive, blank }, channels: { key: id }, updatedAt }
+    //   -> what /setup created or adopted, so a re-run repairs the same channels instead of duplicating.
+    setup: {},
   };
 }
 
@@ -68,6 +71,7 @@ function sanitize(data) {
   if (!isPlainObject(data.settings)) data.settings = {};
   if (typeof data.settings.bypass !== 'boolean') data.settings.bypass = false;
   if (!isPlainObject(data.settings.bypassUsers)) data.settings.bypassUsers = {};
+  if (!isPlainObject(data.setup)) data.setup = {};
   return data;
 }
 

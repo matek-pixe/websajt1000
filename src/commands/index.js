@@ -14,6 +14,7 @@ const modules = [
   require('./autorole'),
   require('./massrole'),
   require('./roles'),
+  require('./setup'),
   require('./help'),
   // ticket system
   require('./verify'),

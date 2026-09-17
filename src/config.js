@@ -61,6 +61,15 @@ const config = {
     deleteDelayMs: 5000,
   },
 
+  // /setup: builds the whole server layout. The role ids are only defaults for the owner's own
+  // server; on any other server /setup creates the roles (or takes them as command options).
+  setup: {
+    verifiedRoleId: (env.SETUP_VERIFIED_ROLE_ID || '1545185363327193228').trim(),
+    sensitiveRoleId: (env.SETUP_SENSITIVE_ROLE_ID || '1000782828402917406').trim(),
+    // Name of the read-only reminder channel at the very top of the server.
+    siteName: (env.SETUP_SITE_NAME || '35xw.top').trim() || '35xw.top',
+  },
+
   // Role-gated website: visitors sign in with Discord and only get in if they hold a required role.
   web: {
     enabled: /^(1|true|yes|on)$/i.test((env.WEB_ENABLED || '').trim()),

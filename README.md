@@ -15,6 +15,7 @@ gives everyone an **auto role** on join, **remembers each member's roles** by th
 | `/combo` | everyone | Gives you one Steam **and** one FiveM account together, one below the other, each split into labelled lines (username / e-mail / password / extra). |
 | `/help` | everyone | Lists every command and how to use it. |
 | `/stats` | everyone | Posts the **Rastrošan** embed: member count + top `/steam` and top `/5m` users (separately). |
+| `/setup` | **owner / admins** | Builds (or repairs) the whole server layout in one go — see *Server setup* below. Re-runnable, never deletes anything. |
 | `/aa` | **server owner** | Sets the role every new member gets on **this** server, e.g. `/aa @Member`. Run with no role to see the current setting. |
 | `/f role` | **admins** | Gives a role to **every member** of the server (bots skipped unless `bots:true`). `action:Remove` takes it away from everyone. Shows progress and a summary. |
 | `/roles` | **staff** | Shows the roles the bot remembers for a user (`user:` or paste an `id:` of someone who left) and whether it can restore them, with the reason if not. |
@@ -95,6 +96,34 @@ cooldowns survive restarts.
 **Every server is independent.** Ticket numbers, the category, cooldowns and the staff role are all
 stored per server, so each server starts at `ticket-0001` and never interferes with another. (Only the Steam/FiveM account pools are shared, on purpose, so the same account can
 never be handed out twice anywhere.)
+
+### Server setup (`/setup`)
+
+`/setup` lays out the whole server the way 35xw expects it, and can be run again any time to check
+and repair what is already there. It **never deletes** a channel or a role; it adopts what exists
+(matching by name, ignoring emoji and decoration), renames it to the `emoji ıl NAME` style, moves it
+into the right category and fixes its permissions, and creates whatever is missing.
+
+| Where | What | Who sees it |
+| --- | --- | --- |
+| top | `🌐 ıl 35xw.top` | everyone, read-only (a reminder of the website) |
+| `✅ ıl VERIFY` | `🎫 ıl VERIFY` with the **35xw verification** panel | every new member; **hidden from VERIFIED** members; staff still sees it; nobody can type, only press the button |
+| `🎫 Tickets` | ticket channels + `#transcripts` | staff, admins and the owner only; each ticket is still visible to the person who opened it |
+| `🌍 ıl GENERAL` | `💬 ıl CHAT`, `🤖 ıl CMDS`, `📢 ıl SERVER`, `🗑️ ıl DUMP` | VERIFIED members only |
+| `🔊 ıl VOICE` | `🔊 ıl VOICE #1`, `#2`, `#3` | VERIFIED members only |
+| `🔒 ıl PRIVATE` | `🔒 ıl PRIV` (voice) and `🔒 ıl PRIV-CHAT` | the server owner and the CO-OWNER role only |
+| `🔐 ıl OSJETLJIVO` | whatever channels are already inside it (all synced to the category) | the sensitive role only |
+
+Roles: it uses the VERIFIED and sensitive roles from `.env` (`SETUP_VERIFIED_ROLE_ID`,
+`SETUP_SENSITIVE_ROLE_ID`) when they exist on the server, otherwise the ones you pass as options
+(`/setup verified:@Role staff:@Role coowner:@Role sensitive:@Role`), otherwise it creates them:
+`✅ ıl VERIFIED`, `🎫 ıl TICKET SUPPORT` (also becomes the ticket staff role), `👑 ıl CO-OWNER`,
+plus a **blank role** (invisible name, not shown separately from members). Managed roles are renamed
+to the same style unless you pass `style_roles:false`; the sensitive role is never renamed.
+
+The bot needs **Administrator** (or Manage Channels + Manage Roles) and its role must sit above the
+roles it manages. The summary tells you what was created, repaired or left as is, and warns if the
+auto role (`/aa`) is the VERIFIED role, since new members would then skip verification.
 
 ### Website gated by a Discord role
 

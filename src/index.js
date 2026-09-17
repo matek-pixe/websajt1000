@@ -9,6 +9,7 @@ const { AccountService } = require('./services/accounts');
 const { RoleMemoryService } = require('./services/roleMemory');
 const { TicketService } = require('./services/tickets');
 const { BypassService } = require('./services/bypass');
+const { SetupService } = require('./services/setup');
 const { Cooldown } = require('./services/cooldown');
 const { createWebServer } = require('./web/server');
 const fs = require('node:fs');
@@ -29,10 +30,11 @@ const accounts = new AccountService(storage, config.dataDir);
 const roleMemory = new RoleMemoryService(storage, config.autoRole);
 const tickets = new TicketService(storage, config);
 const bypass = new BypassService(storage, config);
+const setup = new SetupService(storage, config, tickets, roleMemory);
 const cooldown = new Cooldown(config.cooldownMs);
 setInterval(() => cooldown.sweep(), 60_000).unref();
 
-const services = { config, storage, accounts, roleMemory, tickets, bypass, cooldown };
+const services = { config, storage, accounts, roleMemory, tickets, bypass, setup, cooldown };
 
 /**
  * Coalesce bursts of database writes into one. A mass role change (e.g. /f on a big server) fires
