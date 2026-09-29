@@ -14,7 +14,7 @@ const { card, field, ephemeral, deny, say, lines, joinList, plural, mention, tru
 const tick = (s) => `\`${String(s).replace(/`/g, "'")}\``;
 const names = (items) => items.map((i) => tick(i.name));
 
-/** The review card shown before anything is touched. */
+/** The review card shown before anything is touched. Every field is capped so the whole card stays under Discord's 6000 characters. */
 function previewCard(plan) {
   const channels = plan.remove.filter((c) => !c.category);
   const categories = plan.remove.filter((c) => c.category);
@@ -24,19 +24,8 @@ function previewCard(plan) {
     ...plan.keepCategories.map((c) => `Category ${tick(c.name)}, with everything inside it`),
     plan.ticketCategory ? `Category ${tick(plan.ticketCategory.name)}, with open tickets and transcripts` : null,
     `${plural(plan.keptChannels.length, 'channel')} inside kept categories`,
-    r.kept.length ? `Roles: ${joinList(r.kept.map((x) => tick(x.name)), { max: 12, limit: 700 })}` : null,
+    r.kept.length ? `Roles: ${joinList(r.kept.map((x) => tick(x.name)), { max: 12, limit: 450 })}` : null,
   ].filter(Boolean);
-
-  const removed = [
-    channels.length || categories.length
-      ? `${plural(channels.length, 'channel')} and ${plural(categories.length, 'category', 'categories')}: ${joinList(names([...channels, ...categories]), { max: 14, limit: 700 })}`
-      : 'No channels',
-    plan.opts.deleteRoles
-      ? r.remove.length
-        ? `${plural(r.remove.length, 'role')}: ${joinList(names(r.remove), { max: 14, limit: 500 })}`
-        : 'No roles'
-      : 'Roles are left alone',
-  ];
 
   const layout = plan.create;
   const fresh = layout.categories.filter((c) => !c.managed);
@@ -53,20 +42,25 @@ function previewCard(plan) {
   const above = plan.priv.filter((x) => x.why !== 'admin role');
   const access = [
     `Verified members: ${plan.verified.id ? mention.role(plan.verified.id) : 'a new verified role'} (${plan.verified.source})`,
-    `Priv channels: the server owner, ${admins.length ? `admin roles ${joinList(admins.map((x) => mention.role(x.id)), { max: 6 })}` : 'no admin roles found'}, ${above.length ? `the roles above them ${joinList(above.map((x) => mention.role(x.id)), { max: 6 })}, ` : ''}and the co-owner role`,
+    `Priv channels: the server owner, ${admins.length ? `admin roles ${joinList(admins.map((x) => mention.role(x.id)), { max: 5 })}` : 'no admin roles found'}, ${above.length ? `the roles above them ${joinList(above.map((x) => mention.role(x.id)), { max: 5 })}, ` : ''}and the co-owner role`,
   ];
 
+  // Categories go first and get their own field, so the owner can always check them.
   const fields = [
-    field('Stays as it is', truncate(lines(kept, { max: 8, limit: 1000 }), 1024)),
-    field('Will be deleted', truncate(lines(removed, { max: 4, limit: 1000 }), 1024)),
-    field('Will be created', truncate(lines(built, { max: 6, limit: 1000 }), 1024)),
-    field('Access', lines(access)),
+    field('Stays as it is', truncate(lines(kept, { max: 8, limit: 700 }), 700)),
+    field(`Categories deleted (${categories.length})`, categories.length ? joinList(names(categories), { max: 12, limit: 500 }) : 'None'),
+    field(`Channels deleted (${channels.length})`, channels.length ? joinList(names(channels), { max: 16, limit: 800 }) : 'None'),
+    field(`Roles deleted (${plan.opts.deleteRoles ? r.remove.length : 0})`, plan.opts.deleteRoles ? (r.remove.length ? joinList(names(r.remove), { max: 12, limit: 500 }) : 'None') : 'Roles are left alone'),
+    field('Will be created', truncate(lines(built, { max: 6, limit: 800 }), 800)),
+    field('Access', truncate(lines(access), 500)),
   ];
-  if (plan.warnings.length) fields.push(field('Heads up', truncate(lines(plan.warnings, { max: 4, limit: 1000 }), 1024)));
+  if (plan.warnings.length) fields.push(field('Heads up', truncate(lines(plan.warnings, { max: 4, limit: 500 }), 500)));
 
   return card({
     title: 'Rebuild the server?',
-    description: 'This replaces the current layout with the 35xw template. Only what is listed under Will be deleted is removed, and nothing changes until you press the button.',
+    description:
+      'This replaces the current layout with the 35xw template. Only what is listed under deleted is removed, and nothing changes until you press the button. ' +
+      'The result is shown here, or sent to you in a direct message if this channel is deleted.',
     fields,
     tone: 'warn',
     footer: 'setup',
@@ -85,6 +79,7 @@ function summaryCard(report) {
       report.created.length ? field('Created', lines(report.created, { max: 12 })) : null,
       report.updated.length ? field('Updated', lines(report.updated, { max: 8 })) : null,
       report.failed.length ? field('Problems', lines(report.failed, { max: 8 })) : null,
+      report.invite ? field('New invite', report.invite) : null,
       report.warnings.length ? field('Heads up', lines(report.warnings, { max: 5 })) : null,
     ].filter(Boolean),
     tone: bad ? 'warn' : 'ok',
@@ -93,17 +88,49 @@ function summaryCard(report) {
 }
 
 function failureCard(res) {
-  let text = COPY.failed;
-  if (res.reason === 'in_progress') text = 'A rebuild is already running on this server.';
-  else if (res.reason === 'keep_missing') text = `The category ${tick(res.name)} is gone. Run /setup server again to see the new state.`;
-  else if (res.reason === 'build_failed') {
-    text = `Building stopped. The channels created so far were removed again and nothing old was deleted. ${res.message || ''}`.trim();
+  const r = res.report || { deleted: [], created: [], failed: [] };
+  const tail = (left) => {
+    const bits = [];
+    if (left && left.channels.length) bits.push(`These new channels could not be removed again: ${joinList(left.channels.map(tick), { max: 8, limit: 400 })}.`);
+    if (left && left.roles.length) bits.push(`Roles: ${joinList(left.roles, { max: 5, limit: 300 })}.`);
+    return bits.length ? ` ${bits.join(' ')}` : '';
+  };
+  switch (res.reason) {
+    case 'in_progress':
+      return card({ title: 'Already running', description: 'A rebuild is already running on this server.', tone: 'warn', footer: 'setup' });
+    case 'stale':
+      return card({ title: 'Preview expired', description: 'The server was rebuilt since this preview. Run /setup server again to see the current state.', tone: 'warn', footer: 'setup' });
+    case 'keep_missing':
+      return card({ title: 'Nothing was deleted', description: `The category ${tick(res.name)} is gone. Run /setup server again to see the new state.`, tone: 'danger', footer: 'setup' });
+    case 'verified_missing':
+      return card({ title: 'Nothing was deleted', description: 'The verified role no longer exists. Run /setup server again and pick it with the verified option.', tone: 'danger', footer: 'setup' });
+    case 'roles_failed':
+      return card({ title: 'Nothing was deleted', description: `${res.message} Roles created or renamed for this run were reverted.${tail(res.left)}`, tone: 'danger', footer: 'setup' });
+    case 'build_failed':
+      return card({
+        title: 'Nothing was deleted',
+        description: `Building the new layout failed, so the old one is still in place. ${res.message || ''}${tail(res.left)} Roles created or renamed for this run were reverted.`.replace(/\s+/g, ' ').trim(),
+        tone: 'danger',
+        footer: 'setup',
+      });
+    case 'partial':
+      return card({
+        title: 'Rebuild stopped part way',
+        description: `The new layout is built, but the rebuild stopped before it finished: ${res.message || 'unknown error'}. ${plural(r.deleted.length, 'old item')} were deleted. Check the server before running it again.`,
+        fields: r.failed.length ? [field('Problems', lines(r.failed, { max: 8 }))] : [],
+        tone: 'danger',
+        footer: 'setup',
+      });
+    default:
+      return card({ title: 'Rebuild failed', description: 'Something went wrong. Check the server before running the rebuild again.', tone: 'danger', footer: 'setup' });
   }
-  return card({ title: 'Nothing was deleted', description: text, tone: 'danger', footer: 'setup' });
 }
 
-/** Show the final result; if the channel the command ran in is gone, fall back to a direct message. */
-async function deliver(interaction, embed) {
+/**
+ * Show the final result. The channel this ran in is usually deleted by the rebuild, so the order is:
+ * the original reply, a direct message, then a channel of the new layout that the owner can see.
+ */
+async function deliver(interaction, embed, fallbackChannelId) {
   try {
     await interaction.editReply({ embeds: [embed], components: [] });
     return;
@@ -111,10 +138,21 @@ async function deliver(interaction, embed) {
     /* the channel may have been deleted by the rebuild itself */
   }
   try {
-    await interaction.user.send({ embeds: [embed] });
-  } catch (err) {
-    console.warn(`[35xw] /setup server: could not deliver the summary: ${err.message}`);
+    await interaction.user.send({ content: `Result of /setup server on **${interaction.guild.name}**`, embeds: [embed] });
+    return;
+  } catch {
+    /* direct messages may be closed */
   }
+  try {
+    const channel = fallbackChannelId && interaction.guild.channels.cache.get(fallbackChannelId);
+    if (channel) {
+      await channel.send({ content: mention.user(interaction.user.id), embeds: [embed], allowedMentions: { users: [interaction.user.id] } });
+      return;
+    }
+  } catch {
+    /* nothing else to try */
+  }
+  console.warn('[35xw] /setup server: could not deliver the result anywhere');
 }
 
 /**
@@ -189,6 +227,10 @@ module.exports = {
     }
     if (action !== 'go') return undefined;
 
+    // A second press while the first one is starting or running must not touch the progress card.
+    if (ctx.setup.isRunning(interaction.guildId) || ctx.setup.wasStarted(token)) {
+      return say(interaction, 'This rebuild has already started.', 'warn');
+    }
     const plan = ctx.setup.takePending(token, { guildId: interaction.guildId, userId: interaction.user.id });
     if (!plan) {
       return interaction.update({
@@ -196,18 +238,13 @@ module.exports = {
         components: [],
       });
     }
-    if (ctx.setup.isRunning(interaction.guildId)) {
-      return interaction.update({ embeds: [failureCard({ reason: 'in_progress' })], components: [] });
-    }
 
     await interaction.update({ embeds: [progressCard('Starting')], components: [] });
 
     // Progress edits are best effort: the channel this ran in may be deleted along the way.
     let editable = true;
-    let last = 0;
     const onProgress = async (step) => {
-      if (!editable || Date.now() - last < 1000) return;
-      last = Date.now();
+      if (!editable) return;
       try {
         await interaction.editReply({ embeds: [progressCard(step)] });
       } catch {
@@ -222,9 +259,10 @@ module.exports = {
       console.error('[35xw] /setup server failed:', err);
       res = { ok: false, reason: 'error' };
     }
-    return deliver(interaction, res.ok ? summaryCard(res.report) : failureCard(res));
+    return deliver(interaction, res.ok ? summaryCard(res.report) : failureCard(res), res.fallbackChannelId);
   },
 
   _previewCard: previewCard,
   _summaryCard: summaryCard,
+  _failureCard: failureCard,
 };

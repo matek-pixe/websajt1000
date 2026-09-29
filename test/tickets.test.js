@@ -42,7 +42,7 @@ function mkGuild(id = 'G') {
     roles: { cache: new Map() },
     members: { me: { id: 'BOT' }, cache: new Map() },
     channels: {
-      cache: { get: (x) => store.get(x), has: (x) => store.has(x), find: (fn) => [...store.values()].find(fn) },
+      cache: { get: (x) => store.get(x), has: (x) => store.has(x), find: (fn) => [...store.values()].find(fn), values: () => store.values() },
       create: async (o) => {
         const ch = {
           id: `${id}-${n++}`,

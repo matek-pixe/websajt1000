@@ -48,7 +48,7 @@ const perm = (...flags) => ({ has: (p) => flags.includes(p) });
  * Fake guild with just enough of discord.js for the setup and ticket services. Every mutating call
  * is written to g.log so tests can prove what was and was not touched.
  */
-function mkGuild({ roles = [], channels = [], admin = true, failCreateAt = 0, rulesChannelId = null } = {}) {
+function mkGuild({ roles = [], channels = [], admin = true, failCreateAt = 0, rulesChannelId = null, invites = [], invitesFail = false, afkChannelId = null, systemChannelId = null, failRoleCreate = 0, failRoleEdit = false, undeletable = [] } = {}) {
   let seq = 1000;
   let creates = 0;
   const g = {
@@ -57,6 +57,10 @@ function mkGuild({ roles = [], channels = [], admin = true, failCreateAt = 0, ru
     ownerId: 'OWNER',
     rulesChannelId,
     publicUpdatesChannelId: null,
+    afkChannelId,
+    afkTimeout: 300,
+    systemChannelId,
+    invitesList: invites,
     roles: { cache: new Cache() },
     members: {
       me: {
@@ -69,6 +73,7 @@ function mkGuild({ roles = [], channels = [], admin = true, failCreateAt = 0, ru
     channels: { cache: new Cache(), positions: null },
     log: [],
     deleted: { channels: [], roles: [] },
+    invited: [],
     edited: { channels: [], roles: [] },
   };
   const toOverwrites = (list) =>
@@ -88,6 +93,7 @@ function mkGuild({ roles = [], channels = [], admin = true, failCreateAt = 0, ru
       position: o.position ?? 1,
       permissions: o.admin ? perm(P.Administrator) : perm(),
       async edit(patch) {
+        if (failRoleEdit) throw new Error('Missing Permissions');
         g.log.push(['role.edit', r.name, Object.keys(patch).filter((k) => k !== 'reason')]);
         g.edited.roles.push(r.id);
         Object.assign(r, patch);
@@ -103,7 +109,10 @@ function mkGuild({ roles = [], channels = [], admin = true, failCreateAt = 0, ru
     return r;
   };
   g.roles.fetch = async () => g.roles.cache;
+  let roleCreates = 0;
   g.roles.create = async (o) => {
+    roleCreates += 1;
+    if (failRoleCreate && roleCreates >= failRoleCreate) throw new Error('Maximum number of server roles reached');
     g.log.push(['role.create', o.name]);
     return mkRole({ name: o.name, hoist: o.hoist, position: 1 });
   };
@@ -121,8 +130,20 @@ function mkGuild({ roles = [], channels = [], admin = true, failCreateAt = 0, ru
       rawPosition: o.rawPosition ?? seq,
       topic: o.topic || null,
       guild: g,
-      permissionOverwrites: { cache: toOverwrites(o.permissionOverwrites) },
+      permissionOverwrites: {
+        cache: toOverwrites(o.permissionOverwrites),
+        async edit(id) {
+          g.log.push(['channel.overwrite', ch.name, id]);
+          g.edited.channels.push(ch.id);
+          ch.permissionOverwrites.cache.set(id, { id, allow: { bitfield: 1n }, deny: { bitfield: 0n } });
+        },
+      },
       sent: [],
+      async createInvite() {
+        g.log.push(['invite.create', ch.name]);
+        g.invited.push(ch.id);
+        return { url: 'https://discord.gg/newinvite' };
+      },
       async edit(patch) {
         g.log.push(['channel.edit', ch.name, Object.keys(patch).filter((k) => k !== 'reason')]);
         g.edited.channels.push(ch.id);
@@ -137,6 +158,7 @@ function mkGuild({ roles = [], channels = [], admin = true, failCreateAt = 0, ru
         return ch;
       },
       async delete() {
+        if (undeletable.includes(ch.id)) throw new Error('Missing Access');
         g.log.push(['channel.delete', ch.name]);
         g.deleted.channels.push(ch.id);
         g.channels.cache.delete(ch.id);
@@ -154,7 +176,21 @@ function mkGuild({ roles = [], channels = [], admin = true, failCreateAt = 0, ru
     creates += 1;
     if (failCreateAt && creates === failCreateAt) throw new Error('Missing Permissions');
     g.log.push(['channel.create', o.name]);
-    return mkChannel(o);
+    // Discord lowercases text channel names and turns spaces into hyphens; categories and voice keep theirs.
+    const name = o.type === T.GuildText ? o.name.toLowerCase().replace(/\s+/g, '-') : o.name;
+    return mkChannel({ ...o, name });
+  };
+  g.invites = {
+    fetch: async () => {
+      if (invitesFail) throw new Error('Missing Permissions');
+      return new Map(g.invitesList.map((i) => [i.code, i]));
+    },
+  };
+  g.setAFKChannel = async (ch) => {
+    g.afkChannelId = ch.id;
+  };
+  g.setSystemChannel = async (ch) => {
+    g.systemChannelId = ch.id;
   };
   g.channels.setPositions = async (list) => {
     g.channels.positions = list;
@@ -207,11 +243,11 @@ function currentServer(extra = {}) {
   };
 }
 
-function mkServices(dir) {
-  const storage = new Storage(path.join(dir, 'db.json'));
-  const tickets = new TicketService(storage, CFG);
-  const roleMemory = new RoleMemoryService(storage, CFG.autoRole);
-  const setup = new SetupService(storage, CFG, tickets, roleMemory);
+function mkServices(dir, file = 'db.json', cfg = CFG) {
+  const storage = new Storage(path.join(dir, file));
+  const tickets = new TicketService(storage, cfg);
+  const roleMemory = new RoleMemoryService(storage, cfg.autoRole);
+  const setup = new SetupService(storage, cfg, tickets, roleMemory);
   return { storage, tickets, roleMemory, setup };
 }
 
@@ -223,7 +259,7 @@ const roleByName = (g, name) => [...g.roles.cache.values()].find((r) => r.name =
 const touched = (g, name) => g.log.filter((l) => l[1] === name);
 
 test('name helpers ignore decoration and recognise the + role', () => {
-  assert.equal(normalizeName('🎫 ıl VERIFY'), 'verify');
+  assert.equal(normalizeName('🎫・verify'), 'verify');
   assert.equal(normalizeName('🎫ticket'), 'ticket');
   assert.equal(normalizeName('🔐 osjetljivo'), 'osjetljivo');
   assert.equal(normalizeName('🔊 ıl VOICE #1'), 'voice#1');
@@ -513,15 +549,15 @@ test('execute rebuilds the layout: new things exist, old ones are gone, kept thi
 
     const cat = (n) => byName(g, n);
     const kids = (c) => [...g.channels.cache.values()].filter((x) => x.parentId === c.id).map((x) => x.name);
-    assert.deepEqual(kids(cat('🔒 ıl PRIVATE')), ['🔒 ıl PRIV-CHAT', '🔒 ıl PRIV']);
-    assert.deepEqual(kids(cat('✅ ıl VERIFY')), ['🎫 ıl VERIFY']);
-    assert.deepEqual(kids(cat('📌 ıl INFO')), ['📜 ıl RULES', '📢 ıl ANNOUNCEMENTS', '🛠️ ıl CHANGELOG', 'ℹ️ ıl INFORMATION', '🛒 ıl BUY-TRIGGERS', '🆗 ıl JOINS']);
-    assert.deepEqual(kids(cat('🌍 ıl GENERAL')), ['💬 ıl CHAT', '🌍 ıl BALKAN', '🤖 ıl CMDS', '🎮 ıl GEN', '♾️ ıl TRIGGERS', '📢 ıl SERVER', '🗑️ ıl DUMP']);
+    assert.deepEqual(kids(cat('🔒 ıl PRIVATE')), ['🔒・priv-chat', '🔒 ıl PRIV']);
+    assert.deepEqual(kids(cat('✅ ıl VERIFY')), ['🎫・verify']);
+    assert.deepEqual(kids(cat('📌 ıl INFO')), ['📜・rules', '📢・announcements', '🛠️・changelog', 'ℹ️・information', '🛒・buy-triggers', '🆗・joins']);
+    assert.deepEqual(kids(cat('🌍 ıl GENERAL')), ['💬・chat', '🌍・balkan', '🤖・cmds', '🎮・gen', '♾️・triggers', '📢・server', '🗑️・dump']);
     assert.deepEqual(kids(cat('🔊 ıl VOICE')), ['🔊 ıl VOICE #1', '🔊 ıl VOICE #2', '🔊 ıl VOICE #3', '🌍 ıl BALKAN', '💤 ıl AFK']);
-    assert.deepEqual(kids(cat('💎 ıl VIP')), ['💎 ıl VIP-CHAT', '💎 ıl VIP VOICE']);
-    assert.deepEqual(kids(cat('🛡️ ıl STAFF')), ['📣 ıl STAFF-NEWS', '💬 ıl STAFF-CHAT', '🚩 ıl REPORTS', '📋 ıl LOGS', '🛡️ ıl STAFF VOICE']);
+    assert.deepEqual(kids(cat('💎 ıl VIP')), ['💎・vip-chat', '💎 ıl VIP VOICE']);
+    assert.deepEqual(kids(cat('🛡️ ıl STAFF')), ['📣・staff-news', '💬・staff-chat', '🚩・reports', '📋・logs', '🛡️ ıl STAFF VOICE']);
     assert.equal(byName(g, '🔒 ıl PRIV').type, T.GuildVoice);
-    assert.equal(byName(g, '💬 ıl CHAT').topic, 'General chat for verified members.');
+    assert.equal(byName(g, '💬・chat').topic, 'General chat for verified members.');
 
     // roles: vip and Friends reused in place, three created, blank one is not hoisted
     assert.equal(g.roles.cache.get('VIP').name, '💎 ıl VIP');
@@ -534,17 +570,17 @@ test('execute rebuilds the layout: new things exist, old ones are gone, kept thi
     assert.equal(tickets.getStaffRole('G'), support.id);
 
     // permissions
-    const verify = byName(g, '🎫 ıl VERIFY');
+    const verify = byName(g, '🎫・verify');
     assert.ok(allows(verify, 'G', P.ViewChannel));
     assert.ok(denies(verify, 'G', P.SendMessages));
     assert.ok(denies(verify, VERIFIED, P.ViewChannel));
     assert.ok(allows(verify, support.id, P.ViewChannel));
-    for (const n of ['🌍 ıl GENERAL', '💬 ıl CHAT', '🔊 ıl VOICE', '🔊 ıl VOICE #3']) {
+    for (const n of ['🌍 ıl GENERAL', '💬・chat', '🔊 ıl VOICE', '🔊 ıl VOICE #3']) {
       const ch = byName(g, n);
       assert.ok(denies(ch, 'G', P.ViewChannel), n);
       assert.ok(allows(ch, VERIFIED, P.ViewChannel), n);
     }
-    for (const n of ['🔒 ıl PRIVATE', '🔒 ıl PRIV', '🔒 ıl PRIV-CHAT']) {
+    for (const n of ['🔒 ıl PRIVATE', '🔒 ıl PRIV', '🔒・priv-chat']) {
       const ch = byName(g, n);
       assert.ok(denies(ch, 'G', P.ViewChannel), n);
       assert.ok(allows(ch, 'OWNER', P.ViewChannel), n);
@@ -555,7 +591,7 @@ test('execute rebuilds the layout: new things exist, old ones are gone, kept thi
       for (const id of [VERIFIED, 'VIP', 'FRIENDS', 'MEMBER', 'MUTED', 'OLDSTAFF']) assert.ok(!ow(ch, id), `${n} ${id}`);
     }
     // info is read-only for verified members, staff can post
-    for (const n of ['📌 ıl INFO', '📜 ıl RULES', 'ℹ️ ıl INFORMATION', '🛒 ıl BUY-TRIGGERS', '🆗 ıl JOINS']) {
+    for (const n of ['📌 ıl INFO', '📜・rules', 'ℹ️・information', '🛒・buy-triggers', '🆗・joins']) {
       const ch = byName(g, n);
       assert.ok(denies(ch, 'G', P.ViewChannel), n);
       assert.ok(allows(ch, VERIFIED, P.ViewChannel), n);
@@ -564,7 +600,7 @@ test('execute rebuilds the layout: new things exist, old ones are gone, kept thi
     }
     // VIP area: the VIP role and staff, not plain verified members
     const vipRole = g.roles.cache.get('VIP');
-    for (const n of ['💎 ıl VIP', '💎 ıl VIP-CHAT', '💎 ıl VIP VOICE']) {
+    for (const n of ['💎 ıl VIP', '💎・vip-chat', '💎 ıl VIP VOICE']) {
       const ch = byName(g, n);
       assert.ok(denies(ch, 'G', P.ViewChannel), n);
       assert.ok(allows(ch, vipRole.id, P.ViewChannel), n);
@@ -572,7 +608,7 @@ test('execute rebuilds the layout: new things exist, old ones are gone, kept thi
       assert.ok(!ow(ch, VERIFIED), n);
     }
     // staff area: support and co-owner only
-    for (const n of ['🛡️ ıl STAFF', '📋 ıl LOGS', '🛡️ ıl STAFF VOICE']) {
+    for (const n of ['🛡️ ıl STAFF', '📋・logs', '🛡️ ıl STAFF VOICE']) {
       const ch = byName(g, n);
       assert.ok(denies(ch, 'G', P.ViewChannel), n);
       assert.ok(allows(ch, support.id, P.ViewChannel), n);
@@ -644,10 +680,10 @@ test('delete_roles false leaves every role alone, and the priv role option contr
   }
 });
 
-test('a failed build removes what it created and deletes nothing old', async () => {
+test('a failed build removes what it created, reverts the roles and deletes nothing old', async () => {
   const dir = tmpDir();
   try {
-    const { setup } = mkServices(dir);
+    const { setup, tickets } = mkServices(dir);
     const g = mkGuild({ ...currentServer(), failCreateAt: 6 });
     const before = [...g.channels.cache.keys()].sort();
     const { plan } = await setup.preview(g, {});
@@ -656,9 +692,82 @@ test('a failed build removes what it created and deletes nothing old', async () 
     assert.equal(res.reason, 'build_failed');
     assert.match(res.message, /Missing Permissions/);
     assert.deepEqual([...g.channels.cache.keys()].sort(), before);
-    assert.ok(g.log.filter((l) => l[0] === 'channel.delete').every((l) => l[1].includes('ıl')), 'only newly created channels were deleted');
-    assert.ok(roleByName(g, 'Muted'));
+    assert.deepEqual(res.left, { channels: [], roles: [] });
+    const made = g.log.filter((l) => l[0] === 'channel.create').map((l) => l[1].toLowerCase());
+    assert.ok(g.log.filter((l) => l[0] === 'channel.delete').every((l) => made.includes(l[1].toLowerCase())), 'only channels this run made were deleted');
+    // roles: the new ones are gone again and the renamed ones have their name back
+    assert.equal(roleByName(g, '🎫 ıl SUPPORT'), undefined);
+    assert.equal(roleByName(g, '👑 ıl CO-OWNER'), undefined);
+    assert.equal(g.roles.cache.get('VIP').name, 'vip');
+    assert.equal(g.roles.cache.get('FRIENDS').name, 'Friends');
+    assert.deepEqual(g.deleted.roles.filter((id) => ['MUTED', 'OLDSTAFF'].includes(id)), []);
+    assert.equal(tickets.getStaffRole('G'), null); // ticket state untouched
+    assert.deepEqual(g.log.filter((l) => l[0] === 'channel.edit' || l[0] === 'channel.overwrite'), []);
     assert.equal(setup.isRunning('G'), false);
+  } finally {
+    rm(dir);
+  }
+});
+
+test('rollback only touches what the run created, and says what it could not remove', async () => {
+  const dir = tmpDir();
+  try {
+    const { setup, tickets } = mkServices(dir);
+    // a member opens a ticket while the ticket service resolves its category
+    const g = mkGuild({ ...currentServer(), failCreateAt: 9 });
+    const realTranscript = tickets.ensureTranscriptChannel.bind(tickets);
+    tickets.ensureTranscriptChannel = async (guild) => {
+      guild.mkChannel({ id: 'ticket-2', name: 'ticket-0002', type: T.GuildText, parent: 'cat-tickets' });
+      guild.mkChannel({ id: 'foreign', name: 'made-by-a-site-bot', type: T.GuildText, parent: 'cat-osj' });
+      return realTranscript(guild);
+    };
+    const { plan } = await setup.preview(g, {});
+    const res = await setup.execute(g, plan);
+    assert.equal(res.reason, 'build_failed');
+    assert.ok(g.channels.cache.has('ticket-2'), 'the ticket opened meanwhile survives');
+    assert.ok(g.channels.cache.has('foreign'), 'channels other actors made survive');
+
+    // deletes of the new channels fail: they are listed instead of claimed as removed
+    const g2 = mkGuild({ ...currentServer(), failCreateAt: 9 });
+    const { plan: plan2 } = await setup.preview(g2, {});
+    const original = g2.channels.create;
+    g2.channels.create = async (o) => {
+      const ch = await original(o);
+      if (o.name !== '🌐 ıl 35xw.top') ch.delete = async () => { throw new Error('Missing Access'); };
+      return ch;
+    };
+    const res2 = await setup.execute(g2, plan2);
+    assert.equal(res2.reason, 'build_failed');
+    assert.ok(res2.left.channels.length > 0);
+    const { _failureCard } = require('../src/commands/setup');
+    const text = _failureCard(res2).toJSON().description;
+    assert.match(text, /could not be removed again/);
+  } finally {
+    rm(dir);
+  }
+});
+
+test('a role that cannot be created stops the rebuild before anything is deleted', async () => {
+  const dir = tmpDir();
+  try {
+    const { setup } = mkServices(dir);
+    const g = mkGuild({ ...currentServer(), failRoleCreate: 2 });
+    const { plan } = await setup.preview(g, {});
+    const res = await setup.execute(g, plan);
+    assert.equal(res.ok, false);
+    assert.equal(res.reason, 'roles_failed');
+    assert.deepEqual(g.deleted.channels, []);
+    assert.deepEqual(g.deleted.roles.filter((id) => ['MUTED', 'OLDSTAFF'].includes(id)), []);
+    assert.equal(g.log.filter((l) => l[0] === 'channel.create').length, 0);
+    assert.equal(g.roles.cache.get('VIP').name, 'vip'); // renamed roles were put back
+
+    // the verified role vanished after the preview
+    const g2 = mkGuild(currentServer());
+    const { plan: plan2 } = await setup.preview(g2, {});
+    g2.roles.cache.delete(VERIFIED);
+    const res2 = await setup.execute(g2, plan2);
+    assert.equal(res2.reason, 'verified_missing');
+    assert.deepEqual(g2.log, []);
   } finally {
     rm(dir);
   }
@@ -751,10 +860,17 @@ test('pending confirmations are single use, bound to the user and the server, an
 });
 
 /** A fake interaction plus ctx for the /setup command. */
-function mkInteraction(g, setup, { userId = 'OWNER', customId = null, sub = 'server', options = {}, editFails = false } = {}) {
+function mkInteraction(g, setup, { userId = 'OWNER', customId = null, sub = 'server', options = {}, editFails = false, dmFails = false } = {}) {
   const st = { replies: [], edits: [], updates: [], dms: [], deferred: null };
   const it = {
-    user: { id: userId, username: userId, send: async (p) => st.dms.push(p) },
+    user: {
+      id: userId,
+      username: userId,
+      send: async (p) => {
+        if (dmFails) throw new Error('Cannot send messages to this user');
+        st.dms.push(p);
+      },
+    },
     guild: g,
     guildId: g.id,
     customId,
@@ -809,7 +925,7 @@ test('/setup server: preview card with a confirm and a cancel button, nothing de
     assert.equal(titleOf(p), 'Rebuild the server?');
     const e = p.embeds[0].toJSON();
     const names = e.fields.map((f) => f.name);
-    assert.deepEqual(names.slice(0, 4), ['Stays as it is', 'Will be deleted', 'Will be created', 'Access']);
+    assert.deepEqual(names.slice(0, 6).map((n) => n.replace(/ \(\d+\)$/, '')), ['Stays as it is', 'Categories deleted', 'Channels deleted', 'Roles deleted', 'Will be created', 'Access']);
     const all = e.fields.map((f) => f.value).join('\n');
     assert.match(all, /osjetljivo/);
     assert.match(all, /Muted/);
@@ -899,7 +1015,8 @@ test('/setup server buttons: cancel, wrong person, expired, and a full confirmed
     assert.equal(byName(g, 'old-chat'), undefined);
     const again = mkInteraction(g, setup, { customId: go });
     await cmd.handleButton(again.it, again.ctx);
-    assert.equal(titleOf(again.st.updates[0]), 'Preview expired');
+    assert.equal(again.st.updates.length, 0, 'a second press must not overwrite the progress or the summary');
+    assert.match(again.st.replies[0].embeds[0].toJSON().description, /already started/);
   } finally {
     rm(dir);
   }
@@ -958,7 +1075,7 @@ test('verifiedGate: the verified role, owner, admins, manager and bypass pass; e
     await setup.execute(g, plan);
     r = setup.verifiedGate(g, member([]), { id: 'U1' }, opts);
     assert.equal(r.ok, false);
-    assert.equal(r.channelId, byName(g, '🎫 ıl VERIFY').id);
+    assert.equal(r.channelId, byName(g, '🎫・verify').id);
 
     const g2 = mkGuild({});
     assert.equal(setup.getVerifiedRoleId(g2), null);
@@ -996,7 +1113,6 @@ function rng(seed) {
 test('property: on random servers nothing protected is lost and only previewed things are deleted', async () => {
   const dir = tmpDir();
   try {
-    const { setup } = mkServices(dir);
     let rebuilt = 0;
     let refused = 0;
     let rolledBack = 0;
@@ -1052,6 +1168,15 @@ test('property: on random servers nothing protected is lost and only previewed t
           channels.push({ id: `osj-${k}`, name: `secret ${k}`, type: T.GuildText, parent: 'OSJ' });
           mustKeepChannels.add(`osj-${k}`);
         }
+        // a role that only appears in a permission overwrite of the kept category must survive too
+        const named = roles.filter((x) => x.id.startsWith('R'));
+        if (named.length && chance(0.6)) {
+          const pick = named[int(named.length)];
+          channels.find((c) => c.id === 'OSJ').permissionOverwrites = [{ id: pick.id, allow: [P.ViewChannel] }];
+          mustKeepRoles.add(pick.id);
+          untouchedRoles.add(pick.id);
+          adminRoles.delete(pick.id);
+        }
       }
       if (hasTickets) {
         channels.push({ id: 'TCAT', name: '🎫 Tickets', type: T.GuildCategory });
@@ -1065,7 +1190,8 @@ test('property: on random servers nothing protected is lost and only previewed t
       const rules = chance(0.3) ? 'loose1' : null;
       if (rules && !channels.some((c) => c.id === rules)) channels.push({ id: rules, name: 'rules', type: T.GuildText });
 
-      const g = mkGuild({ roles, channels, rulesChannelId: rules, failCreateAt: chance(0.15) ? 1 + int(30) : 0 });
+      const { setup } = mkServices(dir, `db${seed}.json`); // every random server starts with its own database
+      const g = mkGuild({ roles, channels, rulesChannelId: rules, failCreateAt: chance(0.15) ? 1 + int(30) : 0, failRoleCreate: chance(0.08) ? 1 + int(3) : 0 });
       const before = new Set(g.channels.cache.keys());
       const deleteRoles = !chance(0.2);
 
@@ -1090,10 +1216,13 @@ test('property: on random servers nothing protected is lost and only previewed t
       const out = await setup.execute(g, res.plan);
       if (!out.ok) {
         rolledBack += 1;
-        assert.equal(out.reason, 'build_failed', `seed ${seed}`);
-        for (const id of before) assert.ok(g.channels.cache.has(id), `seed ${seed}: a failed build must delete nothing old (${id})`);
-        assert.deepEqual(g.deleted.roles, [], `seed ${seed}: a failed build deletes no roles`);
+        assert.ok(['build_failed', 'roles_failed'].includes(out.reason), `seed ${seed}: ${out.reason}`);
+        for (const id of before) assert.ok(g.channels.cache.has(id), `seed ${seed}: a failed run must delete nothing old (${id})`);
+        const originalRoles = new Set(roles.map((x) => x.id));
+        for (const id of g.deleted.roles) assert.ok(!originalRoles.has(id), `seed ${seed}: a failed run deletes no old role (${id})`);
+        for (const x of roles) assert.equal(g.roles.cache.get(x.id).name, x.name, `seed ${seed}: role ${x.id} got its name back`);
         assert.equal([...g.channels.cache.keys()].length, before.size + 1, `seed ${seed}: the created channels are cleaned up (only "late" is new)`);
+        assert.equal(setup.isRunning('G'), false);
         continue;
       }
       rebuilt += 1;
@@ -1107,7 +1236,7 @@ test('property: on random servers nothing protected is lost and only previewed t
       for (const id of untouchedRoles) assert.ok(!g.edited.roles.includes(id), `seed ${seed}: protected role ${id} was edited`);
       const templateWords = ['coowner', 'suvlasnik', 'support', 'ticketsupport', 'staff', 'ticketstaff', 'vip', 'vips', 'friend', 'friends'];
       for (const [id, original] of adminRoles) {
-        if (g.edited.roles.includes(id)) assert.ok(templateWords.includes(normalizeName(original)), `seed ${seed}: admin role ${original} was renamed but is not a template role`);
+        if (g.edited.roles.includes(id)) assert.ok(templateWords.includes(normalizeName(original)), `seed ${seed}: admin role ${original} (${id}) was renamed but is not a template role; staff=${setup.tickets.getStaffRole('G')} edits=${JSON.stringify(g.log.filter((l) => l[0] === 'role.edit'))}`);
       }
       assert.ok(g.channels.cache.has('late'), `seed ${seed}: a channel made after the preview must survive`);
       assert.ok(g.roles.cache.has('LATE'), `seed ${seed}: a role made after the preview must survive`);
@@ -1115,7 +1244,7 @@ test('property: on random servers nothing protected is lost and only previewed t
       for (const id of g.deleted.roles) assert.ok(listedRoles.has(id), `seed ${seed}: role ${id} was deleted without being previewed`);
       if (!deleteRoles) assert.deepEqual(g.deleted.roles, [], `seed ${seed}: delete_roles false deletes no roles`);
       if (rules) assert.ok(g.channels.cache.has(rules), `seed ${seed}: the rules channel is still there`);
-      assert.ok(byName(g, '🎫 ıl VERIFY'), `seed ${seed}: the new layout exists`);
+      assert.ok(byName(g, '🎫・verify'), `seed ${seed}: the new layout exists`);
       // the private channels are never opened to ordinary members
       const privCh = byName(g, '🔒 ıl PRIV');
       const adminFloor = Math.min(...roles.filter((x) => x.admin && !x.managed).map((x) => x.position), Infinity);
@@ -1136,5 +1265,417 @@ test('property: on random servers nothing protected is lost and only previewed t
     assert.ok(rebuilt > 100 && refused > 5 && rolledBack > 5, `the generator should cover every branch (rebuilt ${rebuilt}, refused ${refused}, rolled back ${rolledBack})`);
   } finally {
     rm(dir);
+  }
+});
+
+// ---------- findings from the independent review ----------
+
+const goButton = async (cmd, g, setup, options = {}, extra = {}) => {
+  const first = mkInteraction(g, setup, { options });
+  await cmd.execute(first.it, first.ctx);
+  const go = first.st.edits[0].components[0].toJSON().components[0].custom_id;
+  const b = mkInteraction(g, setup, { customId: go, ...extra });
+  await cmd.handleButton(b.it, b.ctx);
+  return { b, first };
+};
+
+test('roles that appear only in the permissions of a kept channel are never deleted, also when that changes after the preview', async () => {
+  const dir = tmpDir();
+  try {
+    const { setup } = mkServices(dir);
+    const data = currentServer();
+    data.roles.push({ id: 'DEV', name: 'Site devs', position: 1 });
+    data.channels = data.channels.map((c) => (c.id === 'o2' ? { ...c, permissionOverwrites: [{ id: 'G', deny: [P.ViewChannel] }, { id: 'DEV', allow: [P.ViewChannel] }] } : c));
+    const g = mkGuild(data);
+    const { plan } = await setup.preview(g, {});
+    assert.ok(plan.roles.kept.some((r) => r.id === 'DEV' && r.reason === 'used in a kept channel'));
+    assert.ok(!plan.roles.remove.some((r) => r.id === 'DEV'));
+    // a listed role starts being used by a kept channel after the preview
+    g.channels.cache.get('o3').permissionOverwrites.cache.set('MUTED', { id: 'MUTED', allow: { bitfield: 1n }, deny: { bitfield: 0n } });
+    await setup.execute(g, plan);
+    assert.ok(g.roles.cache.has('DEV'));
+    assert.ok(g.roles.cache.has('MUTED'));
+    assert.ok(!g.deleted.roles.includes('DEV'));
+    assert.equal(roleByName(g, 'Old staff'), undefined); // an unrelated listed role is still deleted
+  } finally {
+    rm(dir);
+  }
+});
+
+test('a transcripts channel inside a kept category is never taken over; the ticket one is made in the tickets category', async () => {
+  const dir = tmpDir();
+  try {
+    const { setup, tickets } = mkServices(dir);
+    const data = currentServer();
+    data.channels = data.channels.filter((c) => c.id !== 'transcripts');
+    data.channels.push({ id: 'osj-tr', name: 'transcripts', type: T.GuildText, parent: 'cat-osj' });
+    const g = mkGuild(data);
+    const { plan } = await setup.preview(g, {});
+    await setup.execute(g, plan);
+    assert.equal(g.channels.cache.get('osj-tr').parentId, 'cat-osj');
+    assert.ok(!g.edited.channels.includes('osj-tr'), 'the channel inside the kept category was not edited');
+    assert.ok(!g.deleted.channels.includes('osj-tr'));
+    const own = [...g.channels.cache.values()].find((c) => c.name === 'transcripts' && c.parentId === 'cat-tickets');
+    assert.ok(own, 'a transcripts channel exists in the tickets category');
+    assert.notEqual(own.id, 'osj-tr');
+    assert.equal(tickets.findCategory(g).id, 'cat-tickets');
+  } finally {
+    rm(dir);
+  }
+});
+
+test('preview and execution agree on the tickets category, whatever else is named like it', async () => {
+  const dir = tmpDir();
+  try {
+    const { setup, tickets } = mkServices(dir);
+    const data = currentServer();
+    data.channels.unshift({ id: 'decoy', name: '🎫 tickets', type: T.GuildCategory, rawPosition: -5 }); // same name, empty, first in order
+    let g = mkGuild(data);
+    // the stored id wins over the name
+    tickets._guild('G').categoryId = 'cat-tickets';
+    assert.equal(tickets.findCategory(g).id, 'cat-tickets');
+    const { plan } = await setup.preview(g, {});
+    assert.equal(plan.ticketCategory.id, 'cat-tickets');
+    assert.ok(plan.remove.some((c) => c.id === 'decoy'));
+    await setup.execute(g, plan);
+    assert.ok(g.channels.cache.has('cat-tickets') && g.channels.cache.has('transcripts') && g.channels.cache.has('ticket-1'));
+    assert.equal(tickets._guild('G').categoryId, 'cat-tickets');
+
+    // a stale stored id falls back to the name
+    g = mkGuild(currentServer());
+    tickets._guild('G').categoryId = 'gone';
+    assert.equal(tickets.findCategory(g).id, 'cat-tickets');
+  } finally {
+    rm(dir);
+  }
+});
+
+test('a preview goes stale after a rebuild: other tokens are dropped and an old plan is refused', async () => {
+  const dir = tmpDir();
+  try {
+    const { setup } = mkServices(dir);
+    const g = mkGuild(currentServer());
+    const { plan } = await setup.preview(g, {});
+    const { plan: second } = await setup.preview(g, {});
+    setup.createPending(plan, 'OWNER');
+    setup.createPending(second, 'OWNER');
+    assert.equal((await setup.execute(g, plan)).ok, true);
+    assert.equal(setup.pending.size, 0);
+    const creates = g.log.filter((l) => l[0] === 'channel.create').length;
+    const res = await setup.execute(g, second);
+    assert.equal(res.reason, 'stale');
+    assert.equal(g.log.filter((l) => l[0] === 'channel.create').length, creates, 'the stale plan builds nothing');
+    // a fresh preview works again
+    const fresh = await setup.preview(g, {});
+    assert.equal(fresh.plan.gen, 1);
+  } finally {
+    rm(dir);
+  }
+});
+
+test('an error after the old layout is gone is reported as a partial rebuild, and a failed save is only a warning', async () => {
+  const dir = tmpDir();
+  try {
+    const { setup } = mkServices(dir);
+    const { _failureCard } = require('../src/commands/setup');
+    const g = mkGuild(currentServer());
+    const { plan } = await setup.preview(g, {});
+    setup._order = async () => {
+      throw new Error('boom');
+    };
+    const res = await setup.execute(g, plan);
+    assert.equal(res.ok, false);
+    assert.equal(res.reason, 'partial');
+    assert.ok(res.report.deleted.length > 0);
+    assert.equal(res.fallbackChannelId, byName(g, '🔒・priv-chat').id);
+    const card = _failureCard(res).toJSON();
+    assert.equal(card.title, 'Rebuild stopped part way');
+    assert.match(card.description, /boom/);
+    assert.match(card.description, /Check the server/);
+    assert.equal(setup.isRunning('G'), false);
+
+    // saving fails only at the very end: the rebuild itself is done, so it is a warning
+    const g2 = mkGuild(currentServer());
+    const s2 = mkServices(dir, 'other.json');
+    const realSave = s2.setup.storage.save.bind(s2.setup.storage);
+    let armed = false;
+    s2.setup.storage.save = () => {
+      if (armed) throw new Error('ENOSPC');
+      realSave();
+    };
+    const realSettings = s2.setup._settings.bind(s2.setup);
+    s2.setup._settings = async (...args) => {
+      await realSettings(...args);
+      armed = true;
+    };
+    const { plan: plan3 } = await s2.setup.preview(g2, {});
+    const ok = await s2.setup.execute(g2, plan3);
+    assert.equal(ok.ok, true);
+    assert.match(ok.report.warnings.join(' '), /ENOSPC/);
+  } finally {
+    rm(dir);
+  }
+});
+
+test('the failure card says what really happened for every reason', () => {
+  const { _failureCard } = require('../src/commands/setup');
+  const t = (res) => _failureCard(res).toJSON();
+  assert.equal(t({ reason: 'in_progress' }).title, 'Already running');
+  assert.equal(t({ reason: 'stale' }).title, 'Preview expired');
+  assert.equal(t({ reason: 'keep_missing', name: 'osjetljivo' }).title, 'Nothing was deleted');
+  assert.match(t({ reason: 'verified_missing' }).description, /verified role/);
+  assert.match(t({ reason: 'roles_failed', message: 'The support role could not be set up.', left: { channels: [], roles: ['x is still renamed to y'] } }).description, /still renamed/);
+  assert.equal(t({ reason: 'partial', message: 'x', report: { deleted: ['a'], failed: ['b'] } }).title, 'Rebuild stopped part way');
+  const generic = t({ reason: 'error' });
+  assert.equal(generic.title, 'Rebuild failed');
+  assert.doesNotMatch(generic.description, /Nothing was deleted/); // never claims a clean state it cannot know
+});
+
+test('invites for deleted channels are warned about and replaced; the AFK and system channels move to the new ones', async () => {
+  const dir = tmpDir();
+  try {
+    const { setup } = mkServices(dir);
+    const g = mkGuild({ ...currentServer(), invites: [{ code: 'abc', channelId: 'ticket' }, { code: 'keep', channelId: 'o1' }], afkChannelId: 'voice', systemChannelId: 'general' });
+    const { plan } = await setup.preview(g, {});
+    assert.equal(plan.invites, 1);
+    assert.match(plan.warnings.join(' '), /1 invite/);
+    assert.deepEqual(plan.afk, { timeout: 300 });
+    assert.equal(plan.system, true);
+    const res = await setup.execute(g, plan);
+    assert.equal(res.invite, 'https://discord.gg/newinvite');
+    assert.deepEqual(g.invited, [byName(g, '🎫・verify').id]);
+    assert.equal(g.afkChannelId, byName(g, '💤 ıl AFK').id);
+    assert.equal(g.systemChannelId, byName(g, '💬・chat').id);
+
+    // without permission to read invites nothing breaks
+    const g2 = mkGuild({ ...currentServer(), invitesFail: true });
+    const p2 = await setup.preview(g2, {});
+    assert.equal(p2.plan.invites, 0);
+    assert.equal((await setup.execute(g2, p2.plan)).invite, null);
+  } finally {
+    rm(dir);
+  }
+});
+
+test('the preview card always names the categories and stays inside Discord limits, even for huge servers', async () => {
+  const dir = tmpDir();
+  try {
+    const { setup } = mkServices(dir);
+    const { _previewCard } = require('../src/commands/setup');
+    const data = currentServer();
+    for (let i = 0; i < 40; i++) {
+      data.channels.push({ id: `bc${i}`, name: `business-${i}`, type: T.GuildCategory });
+      for (let k = 0; k < 6; k++) data.channels.push({ id: `bc${i}-${k}`, name: `business-${i}-chan-${k}`, type: T.GuildText, parent: `bc${i}` });
+      data.roles.push({ id: `role${i}`, name: `some long role name number ${i}`, position: 1 });
+    }
+    const g = mkGuild(data);
+    const { plan } = await setup.preview(g, {});
+    const e = _previewCard(plan).toJSON();
+    const total = (e.title || '').length + (e.description || '').length + e.fields.reduce((n, f) => n + f.name.length + f.value.length, 0) + (e.footer ? e.footer.text.length : 0);
+    assert.ok(total <= 6000, `card is ${total} characters`);
+    for (const f of e.fields) assert.ok(f.value.length <= 1024, f.name);
+    const cats = e.fields.find((f) => f.name.startsWith('Categories deleted'));
+    assert.match(cats.name, /\(4[0-9]\)/);
+    assert.match(cats.value, /`business-0`/);
+    assert.match(cats.value, /more/);
+
+    // a moderate server lists every category by name even with dozens of channels
+    const mid = currentServer();
+    for (let i = 0; i < 5; i++) {
+      mid.channels.push({ id: `mc${i}`, name: `site-backups-${i}`, type: T.GuildCategory });
+      for (let k = 0; k < 8; k++) mid.channels.push({ id: `mc${i}-${k}`, name: `mc-${i}-${k}`, type: T.GuildText, parent: `mc${i}` });
+    }
+    const p2 = await setup.preview(mkGuild(mid), {});
+    const cats2 = _previewCard(p2.plan).toJSON().fields.find((f) => f.name.startsWith('Categories deleted')).value;
+    for (let i = 0; i < 5; i++) assert.match(cats2, new RegExp(`site-backups-${i}`));
+  } finally {
+    rm(dir);
+  }
+});
+
+test('the command options reach the plan: delete_roles, keep, priv_role and verified', async () => {
+  const dir = tmpDir();
+  try {
+    const cmd = require('../src/commands/setup');
+
+    // delete_roles:false
+    let t = mkServices(dir, 'a.json');
+    let g = mkGuild(currentServer());
+    await goButton(cmd, g, t.setup, { delete_roles: false });
+    assert.deepEqual(g.deleted.roles, []);
+    assert.ok(g.deleted.channels.length > 0);
+
+    // keep: an extra category and its channels stay untouched
+    t = mkServices(dir, 'b.json');
+    const data = currentServer();
+    data.channels.push({ id: 'xcat', name: 'site backups', type: T.GuildCategory }, { id: 'x1', name: 'dump-1', type: T.GuildText, parent: 'xcat' });
+    g = mkGuild(data);
+    await goButton(cmd, g, t.setup, { keep: 'xcat' });
+    assert.ok(g.channels.cache.has('xcat') && g.channels.cache.has('x1'));
+    assert.deepEqual(touched(g, 'site backups'), []);
+
+    // priv_role and verified
+    t = mkServices(dir, 'c.json');
+    g = mkGuild(currentServer());
+    await goButton(cmd, g, t.setup, { priv_role: 'OLDSTAFF', verified: 'MUTED' });
+    assert.ok(allows(byName(g, '🔒 ıl PRIV'), 'OLDSTAFF', P.ViewChannel));
+    assert.ok(g.roles.cache.has('OLDSTAFF') && g.roles.cache.has('MUTED'));
+    assert.ok(denies(byName(g, '🎫・verify'), 'MUTED', P.ViewChannel));
+    assert.ok(allows(byName(g, '💬・chat'), 'MUTED', P.ViewChannel));
+    assert.equal(t.storage.data.setup.G.roles.verified, 'MUTED');
+  } finally {
+    rm(dir);
+  }
+});
+
+test('website roles, settings-protected roles and the auto role are kept, and the live server is re-checked before deleting', async () => {
+  const dir = tmpDir();
+  try {
+    const cfg = { ...CFG, web: { roleIds: ['W1'] }, autoRole: { id: 'CFGAUTO', name: 'Member' }, setup: { ...CFG.setup, protectedRoleIds: ['P1'] } };
+    const { setup, roleMemory } = mkServices(dir, 'db.json', cfg);
+    const data = currentServer();
+    data.roles.push(
+      { id: 'W1', name: 'Site access', position: 1 },
+      { id: 'P1', name: 'Never touch', position: 1 },
+      { id: 'AUTO', name: 'Newcomer', position: 1 },
+      { id: 'CFGAUTO', name: 'Starter', position: 1 },
+      { id: 'HIGH', name: 'Later above the bot', position: 1 },
+    );
+    const g = mkGuild(data);
+    roleMemory.setGuildAutoRole('G', 'AUTO', { id: 'OWNER', username: 'o' });
+    const { plan } = await setup.preview(g, {});
+    const kept = new Map(plan.roles.kept.map((r) => [r.id, r.reason]));
+    assert.equal(kept.get('W1'), 'used by the website');
+    assert.equal(kept.get('P1'), 'protected in the settings');
+    assert.equal(kept.get('AUTO'), 'auto role');
+    assert.equal(kept.get('CFGAUTO'), 'auto role');
+    assert.ok(plan.roles.remove.some((r) => r.id === 'HIGH'));
+
+    // after the preview: an admin appears, one becomes the + role, one moves above the bot
+    g.roles.cache.get('MUTED').permissions = perm(P.Administrator);
+    g.roles.cache.get('OLDSTAFF').name = '+';
+    g.roles.cache.get('HIGH').position = 99;
+    await setup.execute(g, plan);
+    for (const id of ['W1', 'P1', 'AUTO', 'CFGAUTO', 'MUTED', 'OLDSTAFF', 'HIGH']) assert.ok(g.roles.cache.has(id), `${id} survives`);
+  } finally {
+    rm(dir);
+  }
+});
+
+test('the result reaches the owner in a channel of the new layout when the reply and the direct message both fail', async () => {
+  const dir = tmpDir();
+  try {
+    const { setup } = mkServices(dir);
+    const cmd = require('../src/commands/setup');
+    const g = mkGuild(currentServer());
+    const { b } = await goButton(cmd, g, setup, {}, { editFails: true, dmFails: true });
+    const priv = byName(g, '🔒・priv-chat');
+    assert.equal(priv.sent.length, 1);
+    assert.equal(priv.sent[0].embeds[0].toJSON().title, 'Server rebuilt');
+    assert.match(priv.sent[0].content, /<@OWNER>/);
+    assert.equal(b.st.dms.length, 0);
+  } finally {
+    rm(dir);
+  }
+});
+
+test('progress shows every step, and a second press of the button leaves the card alone', async () => {
+  const dir = tmpDir();
+  try {
+    const { setup } = mkServices(dir);
+    const cmd = require('../src/commands/setup');
+    const g = mkGuild(currentServer());
+    const { b } = await goButton(cmd, g, setup);
+    const steps = b.st.edits.map((e) => (e.embeds[0].toJSON().description || '').match(/\*\*(.+?)\*\*/)).filter(Boolean).map((m) => m[1]);
+    assert.deepEqual(steps, ['Roles', 'Building', 'Removing old channels', 'Removing old roles', 'Ordering']);
+    assert.equal(setup.wasStarted('nope'), false);
+  } finally {
+    rm(dir);
+  }
+});
+
+test('the ticket staff role becomes SUPPORT in place, an admin staff role stays untouched, and open tickets learn the new role', async () => {
+  const dir = tmpDir();
+  try {
+    // an ordinary staff role with an odd name is reused as SUPPORT
+    let t = mkServices(dir, 'a.json');
+    let g = mkGuild(currentServer());
+    t.tickets.setStaffRole('G', 'OLDSTAFF');
+    let { plan } = await t.setup.preview(g, {});
+    assert.ok(plan.roles.adopt.some((a) => a.key === 'support' && a.id === 'OLDSTAFF'));
+    await t.setup.execute(g, plan);
+    assert.equal(g.roles.cache.get('OLDSTAFF').name, '🎫 ıl SUPPORT');
+    assert.equal(t.tickets.getStaffRole('G'), 'OLDSTAFF');
+    assert.equal(roleByName(g, '🎫 ıl SUPPORT').id, 'OLDSTAFF');
+
+    // an admin role used as staff is not renamed; a new SUPPORT role is created and tickets get it
+    t = mkServices(dir, 'b.json');
+    g = mkGuild(currentServer());
+    t.tickets.setStaffRole('G', 'MOD');
+    t.tickets._guild('G').tickets['ticket-1'] = { number: 1, userId: 'U1', username: 'u1', status: 'open' };
+    ({ plan } = await t.setup.preview(g, {}));
+    assert.ok(plan.roles.kept.some((r) => r.id === 'MOD' && r.reason === 'the ticket staff role'));
+    await t.setup.execute(g, plan);
+    assert.equal(g.roles.cache.get('MOD').name, 'Moderator');
+    const support = roleByName(g, '🎫 ıl SUPPORT');
+    assert.notEqual(support.id, 'MOD');
+    assert.equal(t.tickets.getStaffRole('G'), support.id);
+    assert.ok(g.log.some((l) => l[0] === 'channel.overwrite' && l[1] === 'ticket-0001' && l[2] === support.id), 'the open ticket lists the new support role');
+  } finally {
+    rm(dir);
+  }
+});
+
+test('roles are recognised by their real names: Verified is found, VIP+ is not VIP', () => {
+  const mk = (id, name, position) => ({ id, name, position, managed: false, permissions: perm() });
+  const out = classifyRoles([mk('G', '@everyone', 0), mk('A', 'VIP+', 4), mk('B', 'vip', 3)], { botTop: 50, everyoneId: 'G', protectedIds: new Map() });
+  assert.deepEqual(out.adopt.filter((a) => a.key === 'vip').map((a) => a.id), ['B']);
+  assert.ok(out.remove.some((r) => r.id === 'A'));
+});
+
+test('the verified role is found by its name when the id and the + role are missing', async () => {
+  const dir = tmpDir();
+  try {
+    const { setup } = mkServices(dir);
+    const data = currentServer();
+    data.roles = data.roles.map((r) => (r.id === VERIFIED ? { ...r, id: 'NAMED', name: 'Verified' } : r));
+    const { plan } = await setup.preview(mkGuild(data), {});
+    assert.equal(plan.verified.id, 'NAMED');
+    assert.equal(plan.verified.source, 'a role with that name');
+    assert.ok(!plan.roles.create.some((c) => c.key === 'verified'));
+  } finally {
+    rm(dir);
+  }
+});
+
+test('the preview needs View Channels as well as Manage Channels and Manage Roles', async () => {
+  const dir = tmpDir();
+  try {
+    const { setup } = mkServices(dir);
+    const g = mkGuild({ ...currentServer(), admin: false });
+    g.members.me.permissions.has = (p) => [P.ManageChannels, P.ManageRoles].includes(p);
+    const res = await setup.preview(g, {});
+    assert.equal(res.ok, false);
+    assert.match(res.problems.join(' '), /View Channels/);
+  } finally {
+    rm(dir);
+  }
+});
+
+test('the layout survives Discord renaming rules and the co-owner sees what staff sees', () => {
+  const { buildLayout } = require('../src/services/setup');
+  const layout = buildLayout('35xw.top');
+  const keys = new Set();
+  for (const spec of [...layout.top, ...layout.categories.flatMap((c) => c.channels || [])]) {
+    assert.ok(!keys.has(spec.key), `duplicate key ${spec.key}`);
+    keys.add(spec.key);
+    if (spec.type === T.GuildText) {
+      assert.equal(spec.name, spec.name.toLowerCase(), `${spec.name} would be lowercased by Discord`);
+      assert.ok(!/\s/.test(spec.name), `${spec.name} would get hyphens from Discord`);
+    }
+  }
+  const ids = { everyone: 'G', bot: 'BOT', verified: 'V', support: 'S', coowner: 'CO', vip: 'VIP', privRoles: [], owner: null, manager: null };
+  for (const kind of ['verify', 'members', 'info', 'vip', 'staff']) {
+    assert.ok(permsFor(kind, ids, (f) => f).some((r) => r.id === 'CO'), `${kind} includes the co-owner role`);
   }
 });

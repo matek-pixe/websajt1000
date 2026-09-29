@@ -313,17 +313,29 @@ class TicketService {
   // ---- category / transcript channel ----
 
   /** The "🎫 Tickets" category. Renames a previously used category instead of making a duplicate. */
+  /**
+   * The tickets category: the stored one while it still exists, otherwise the first category with
+   * the configured name. Every caller uses this, so preview and execution never disagree.
+   */
+  findCategory(guild) {
+    const b = this._guild(guild.id);
+    const cats = [...guild.channels.cache.values()].filter((c) => c.type === ChannelType.GuildCategory);
+    const stored = b.categoryId && cats.find((c) => c.id === b.categoryId);
+    if (stored) return stored;
+    const wanted = this.opts.categoryName.toLowerCase();
+    return (
+      cats
+        .filter((c) => c.name.toLowerCase() === wanted)
+        .sort((a, c) => (a.rawPosition || 0) - (c.rawPosition || 0))[0] || null
+    );
+  }
+
   async ensureCategory(guild) {
     const b = this._guild(guild.id);
     const wanted = this.opts.categoryName;
-    let cat = b.categoryId ? guild.channels.cache.get(b.categoryId) : null;
-    if (cat && cat.type !== ChannelType.GuildCategory) cat = null;
-    if (cat && cat.name !== wanted) await cat.setName(wanted, '35xw ticket category renamed').catch(() => {});
-    if (!cat) {
-      cat =
-        guild.channels.cache.find(
-          (c) => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === wanted.toLowerCase(),
-        ) || null;
+    let cat = this.findCategory(guild);
+    if (cat && cat.name !== wanted && cat.id === b.categoryId) {
+      await cat.setName(wanted, '35xw ticket category renamed').catch(() => {});
     }
     if (!cat) {
       cat = await guild.channels.create({
@@ -340,12 +352,15 @@ class TicketService {
     return cat;
   }
 
-  /** The single private transcripts channel (created on demand inside the tickets category). */
+  /** The transcripts channel inside the tickets category (created on demand). Channels elsewhere are never taken over. */
   async ensureTranscriptChannel(guild) {
     const name = this.opts.transcriptChannelName;
-    let ch = guild.channels.cache.find((c) => c.type === ChannelType.GuildText && c.name === name) || null;
+    const category = await this.ensureCategory(guild);
+    let ch =
+      [...guild.channels.cache.values()].find(
+        (c) => c.type === ChannelType.GuildText && c.name === name && c.parentId === category.id,
+      ) || null;
     if (!ch) {
-      const category = await this.ensureCategory(guild);
       ch = await guild.channels.create({
         name,
         type: ChannelType.GuildText,
