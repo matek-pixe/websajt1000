@@ -8,7 +8,7 @@ module.exports = {
   requiresVerified: true, // only members holding the VERIFIED role (given after a ticket)
   data: new SlashCommandBuilder()
     .setName('steam')
-    .setDescription('Dobij Steam račun koji nikada nije bio dan nikome na serveru.'),
+    .setDescription('Get a Steam account that was never given out'),
   async execute(interaction, ctx) {
     await giveAccount(interaction, ctx, 'steam');
   },

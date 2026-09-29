@@ -1,9 +1,16 @@
 'use strict';
 
 const path = require('node:path');
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 
 const env = process.env;
+
+function listOf(value) {
+  return String(value || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
 
 function positiveNumber(value, fallback) {
   const n = Number(value);
@@ -61,13 +68,19 @@ const config = {
     deleteDelayMs: 5000,
   },
 
-  // /setup: builds the whole server layout. The role ids are only defaults for the owner's own
-  // server; on any other server /setup creates the roles (or takes them as command options).
+  // /setup server: rebuilds the whole server layout. The ids are defaults for the owner's own
+  // server. Roles listed here (and the + role, and the website roles) are never deleted.
   setup: {
     verifiedRoleId: (env.SETUP_VERIFIED_ROLE_ID || '1545185363327193228').trim(),
     sensitiveRoleId: (env.SETUP_SENSITIVE_ROLE_ID || '1000782828402917406').trim(),
-    // Name of the read-only reminder channel at the very top of the server.
+    // Name of the voice channel pinned at the top as a reminder of the website.
     siteName: (env.SETUP_SITE_NAME || '35xw.top').trim() || '35xw.top',
+    // Categories that are never touched, with everything inside them (comma separated names).
+    keepCategories: listOf(env.SETUP_KEEP_CATEGORIES || 'osjetljivo'),
+    // Extra role ids that must never be deleted (comma separated).
+    protectedRoleIds: listOf(env.SETUP_PROTECTED_ROLE_IDS),
+    // How long the confirm buttons stay valid.
+    confirmTtlMs: 10 * 60 * 1000,
   },
 
   // Role-gated website: visitors sign in with Discord and only get in if they hold a required role.

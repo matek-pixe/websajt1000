@@ -133,25 +133,26 @@ test('/f refuses non-admins and un-assignable roles, and counts failures', async
   const plain = fakeMember('P');
   let i = fakeInteraction({ user: 'P', member: plain, guild: fakeGuild([]), role: ROLE });
   await massrole.execute(i, ctxFor());
-  assert.ok(i._st.replies[0].content.includes('Only administrators'));
+  const said = (x) => x._st.replies[0].embeds[0].toJSON().description;
+  assert.ok(said(i).includes('Only administrators'));
 
   const admin = fakeMember('ADM', { perms: [PermissionFlagsBits.Administrator] });
   // role above the bot
   i = fakeInteraction({ user: 'ADM', member: admin, guild: fakeGuild([], { botHighest: 1 }), role: ROLE });
   await massrole.execute(i, ctxFor());
-  assert.ok(i._st.replies[0].content.includes('above'));
+  assert.ok(said(i).includes('Drag the bot role above'));
   // managed role
   i = fakeInteraction({ user: 'ADM', member: admin, guild: fakeGuild([]), role: { ...ROLE, managed: true } });
   await massrole.execute(i, ctxFor());
-  assert.ok(i._st.replies[0].content.includes('managed'));
+  assert.ok(said(i).includes('managed'));
   // @everyone
   i = fakeInteraction({ user: 'ADM', member: admin, guild: fakeGuild([]), role: { ...ROLE, id: 'G' } });
   await massrole.execute(i, ctxFor());
-  assert.ok(i._st.replies[0].content.includes('@everyone'));
+  assert.ok(said(i).includes('@everyone'));
   // bot lacks Manage Roles
   i = fakeInteraction({ user: 'ADM', member: admin, guild: fakeGuild([], { botPerms: [] }), role: ROLE });
   await massrole.execute(i, ctxFor());
-  assert.ok(i._st.replies[0].content.includes('Manage Roles'));
+  assert.ok(said(i).includes('Manage Roles'));
 
   // one member fails -> counted, others still done
   const bad = fakeMember('bad');
@@ -164,5 +165,5 @@ test('/f refuses non-admins and un-assignable roles, and counts failures', async
   const embed = i._st.edits.at(-1).embeds[0].toJSON();
   assert.equal(embed.fields.find((f) => f.name === 'Given').value, '1');
   assert.equal(embed.fields.find((f) => f.name === 'Failed').value, '1');
-  assert.ok(embed.fields.find((f) => f.name === 'Errors (first few)').value.includes('bad#0'));
+  assert.ok(embed.fields.find((f) => f.name === 'First errors').value.includes('bad#0'));
 });

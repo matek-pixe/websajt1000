@@ -69,31 +69,34 @@ test('/roles: shows remembered roles for someone who left, split by restorable /
     const i = fakeInteraction({ user: 'A', member: admin, guild: fakeGuild([]), id: LEFT });
     await roles.execute(i, ctx);
     const embed = i._st.replies[0].embeds[0].toJSON();
-    assert.ok(embed.description.includes('not in the server'));
+    assert.equal(embed.title, 'Remembered roles');
+    assert.ok(embed.description.includes('Not in the server'));
     assert.ok(embed.description.includes('matija'));
     const field = (prefix) => embed.fields.find((f) => f.name.startsWith(prefix));
-    assert.ok(field('✅').value.includes('<@&low>'));
-    assert.ok(field('⚠️').value.includes('<@&high>'));
-    assert.ok(field('🗑️').value.includes('`gone`'));
-    assert.ok(field('🕒'));
+    assert.ok(field('Restored on return').value.includes('<@&low>'));
+    assert.ok(field('Above the bot role').value.includes('<@&high>'));
+    assert.ok(field('Above the bot role').value.includes('Drag the bot role above'));
+    assert.ok(field('Deleted roles').value.includes('`gone`'));
+    assert.ok(field('Last saved'));
     assert.equal(i._st.replies[0].flags, 64); // ephemeral
 
     // unknown user -> "nothing remembered"
     const j = fakeInteraction({ user: 'A', member: admin, guild: fakeGuild(['1'.repeat(18)]), pickedUser: { id: '1'.repeat(18) } });
     await roles.execute(j, ctx);
     const e2 = j._st.replies[0].embeds[0].toJSON();
-    assert.ok(e2.description.includes('in the server'));
+    assert.ok(e2.description.includes('In the server'));
+    assert.ok(!e2.description.includes('Not in the server'));
     assert.ok(e2.fields[0].value.includes('Nothing remembered'));
 
     // bad input
     const k = fakeInteraction({ user: 'A', member: admin, guild: fakeGuild([]), id: 'abc' });
     await roles.execute(k, ctx);
-    assert.ok(k._st.replies[0].content.includes('valid'));
+    assert.ok(k._st.replies[0].embeds[0].toJSON().description.includes('valid'));
 
     // non-staff denied
     const l = fakeInteraction({ user: 'P', member: plain, guild: fakeGuild([]), id: '1'.repeat(18) });
     await roles.execute(l, ctx);
-    assert.ok(l._st.replies[0].content.includes('Only staff'));
+    assert.ok(l._st.replies[0].embeds[0].toJSON().description.includes('Only staff'));
   } finally {
     rm(dir);
   }

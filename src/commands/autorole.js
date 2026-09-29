@@ -1,22 +1,22 @@
 'use strict';
 
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
-const { COLORS } = require('./_shared');
+const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+const { card, field, deny, ephemeral, mention, COPY } = require('../ui');
 
 /**
- * /aa — the server owner picks the role that every new member gets on THIS server.
+ * /aa: the server owner picks the role that every new member gets on THIS server.
  * With no role given, it shows the current setting instead.
  */
 module.exports = {
   managerOnly: false,
   data: new SlashCommandBuilder()
     .setName('aa')
-    .setDescription('Postavi rolu koju svaki novi član automatski dobije na ovom serveru.')
+    .setDescription('Set the role every new member gets (owner only)')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addRoleOption((opt) =>
       opt
         .setName('role')
-        .setDescription('Rola koju novi članovi dobiju. Ostavi prazno da vidiš trenutnu.')
+        .setDescription('Role for new members, leave empty to see the current one')
         .setRequired(false),
     ),
 
@@ -27,10 +27,7 @@ module.exports = {
 
     if (!isOwner && !isManager) {
       ctx.refundCooldown();
-      return interaction.reply({
-        content: '⛔ Samo **vlasnik servera** može postaviti auto rolu.',
-        flags: MessageFlags.Ephemeral,
-      });
+      return deny(interaction, COPY.ownerOnly('aa'));
     }
 
     const role = interaction.options.getRole('role');
@@ -39,28 +36,25 @@ module.exports = {
     if (!role) {
       ctx.refundCooldown();
       const currentId = ctx.roleMemory.getGuildAutoRole(guild.id);
-      const embed = new EmbedBuilder().setColor(COLORS.info).setTitle('⚙️ Auto rola');
+      let description = 'No auto role is set. Run /aa with a role to set one.';
+      let tone = 'neutral';
       if (currentId && guild.roles.cache.has(currentId)) {
-        embed.setDescription(`Trenutna auto rola je <@&${currentId}>.\nNovi članovi je automatski dobiju.`);
+        description = `New members get ${mention.role(currentId)} when they join. Run /aa with another role to change it.`;
       } else if (currentId) {
-        embed.setColor(COLORS.warn).setDescription('Postavljena auto rola više ne postoji. Postavi novu s `/aa @rola`.');
-      } else {
-        embed.setDescription('Auto rola nije postavljena za ovaj server.\nPostavi je s `/aa @rola`.');
+        description = 'The saved role no longer exists. Run /aa with a new role to replace it.';
+        tone = 'warn';
       }
-      return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+      return ephemeral(interaction, { embeds: [card({ title: 'Auto role', description, tone, footer: 'Roles' })] });
     }
 
     // Validate the chosen role.
     if (role.id === guild.id) {
       ctx.refundCooldown();
-      return interaction.reply({ content: '❌ Ne možeš koristiti `@everyone` kao auto rolu.', flags: MessageFlags.Ephemeral });
+      return deny(interaction, '@everyone cannot be the auto role. Pick another role.');
     }
     if (role.managed) {
       ctx.refundCooldown();
-      return interaction.reply({
-        content: '❌ Ta rola je kojom upravlja integracija/bot i ne može se ručno dodijeliti. Odaberi običnu rolu.',
-        flags: MessageFlags.Ephemeral,
-      });
+      return deny(interaction, 'That role is managed by an integration or bot and cannot be given by hand. Pick a regular role.');
     }
 
     ctx.roleMemory.setGuildAutoRole(guild.id, role.id, interaction.user);
@@ -70,22 +64,25 @@ module.exports = {
     const botHighest = me ? me.roles.highest.position : 0;
     const assignable = role.position < botHighest;
 
-    const embed = new EmbedBuilder()
-      .setColor(assignable ? COLORS.ok : COLORS.warn)
-      .setTitle('✅ Auto rola postavljena')
-      .setDescription(`Od sada svaki novi član na ovom serveru dobije <@&${role.id}>.`)
-      .setFooter({ text: `35xw • postavio ${interaction.user.username}` })
-      .setTimestamp();
+    const fields = assignable
+      ? []
+      : [
+          field(
+            'Bot role position',
+            `The bot role must sit above ${mention.role(role.id)} to give it. Drag the bot role above that role in Server Settings, Roles.`,
+          ),
+        ];
 
-    if (!assignable) {
-      embed.addFields({
-        name: '⚠️ Pažnja',
-        value:
-          `Rola bota mora biti **iznad** role <@&${role.id}> da bi je bot mogao dodijeliti.\n` +
-          'Idi u Server Settings → Roles i povuci rolu bota iznad te role.',
-      });
-    }
-
-    return interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+    return ephemeral(interaction, {
+      embeds: [
+        card({
+          title: 'Auto role',
+          description: `Every new member on this server now gets ${mention.role(role.id)}.`,
+          fields,
+          tone: assignable ? 'ok' : 'warn',
+          footer: 'Roles',
+        }),
+      ],
+    });
   },
 };

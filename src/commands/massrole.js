@@ -1,7 +1,7 @@
 'use strict';
 
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
-const { COLORS } = require('./_shared');
+const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { card, field, deny, mention, num, lines, COPY } = require('../ui');
 
 /** Admins (Administrator permission), the server owner and the bot manager may use /f. */
 function canUse(interaction, ctx) {
@@ -23,30 +23,30 @@ function needsChange(member, roleId, action) {
 }
 
 /**
- * /f — give (or remove) a role for every member of the server. Admin only.
+ * /f: give (or remove) a role for every member of the server. Admins only.
  */
 module.exports = {
   managerOnly: false,
   data: new SlashCommandBuilder()
     .setName('f')
-    .setDescription('ADMIN: give a role to every member of the server.')
+    .setDescription('Give or remove a role for every member (admins only)')
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-    .addRoleOption((opt) => opt.setName('role').setDescription('The role to give everyone.').setRequired(true))
+    .addRoleOption((opt) => opt.setName('role').setDescription('Role to give or remove').setRequired(true))
     .addStringOption((opt) =>
       opt
         .setName('action')
-        .setDescription('Give (default) or remove the role from everyone.')
+        .setDescription('Give the role or remove it, default is give')
         .setRequired(false)
         .addChoices({ name: 'Give', value: 'give' }, { name: 'Remove', value: 'remove' }),
     )
     .addBooleanOption((opt) =>
-      opt.setName('bots').setDescription('Also apply it to bots (default: no).').setRequired(false),
+      opt.setName('bots').setDescription('Include bots, default is no').setRequired(false),
     ),
 
   async execute(interaction, ctx) {
     if (!canUse(interaction, ctx)) {
       ctx.refundCooldown();
-      return interaction.reply({ content: '⛔ Only administrators can use `/f`.', flags: MessageFlags.Ephemeral });
+      return deny(interaction, COPY.adminOnly('f'));
     }
 
     const guild = interaction.guild;
@@ -57,22 +57,22 @@ module.exports = {
     // Validate that the bot can actually assign this role.
     const me = guild.members.me;
     let problem = null;
-    if (role.id === guild.id) problem = 'You cannot give `@everyone` as a role.';
-    else if (role.managed) problem = 'That role is managed by an integration/bot and cannot be assigned by hand.';
+    if (role.id === guild.id) problem = '@everyone cannot be given or removed. Pick another role.';
+    else if (role.managed) problem = 'That role is managed by an integration or bot and cannot be given by hand. Pick a regular role.';
     else if (me && me.permissions && !me.permissions.has(PermissionFlagsBits.ManageRoles))
-      problem = 'I need the **Manage Roles** permission to do that.';
+      problem = 'The bot is missing the Manage Roles permission. Grant it in Server Settings, Roles, then run /f again.';
     else if (me && me.roles && me.roles.highest && role.position >= me.roles.highest.position)
-      problem = `My role must be **above** <@&${role.id}>. Move my role higher in Server Settings → Roles and try again.`;
+      problem = `The bot role sits below ${mention.role(role.id)}. Drag the bot role above that role in Server Settings, Roles, then run /f again.`;
     if (problem) {
       ctx.refundCooldown();
-      return interaction.reply({ content: `❌ ${problem}`, flags: MessageFlags.Ephemeral });
+      return deny(interaction, problem);
     }
 
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const members = await guild.members.fetch();
     const targets = pickTargets(members, { bots });
-    const verb = action === 'remove' ? 'Removing' : 'Giving';
+    const working = action === 'remove' ? `Removing ${mention.role(role.id)} from members` : `Giving ${mention.role(role.id)} to members`;
 
     let changed = 0;
     let skipped = 0;
@@ -97,25 +97,28 @@ module.exports = {
       if (Date.now() - lastEdit > 3000) {
         lastEdit = Date.now();
         await interaction
-          .editReply({ content: `⏳ ${verb} <@&${role.id}>… ${changed + skipped + failed}/${targets.length}` })
+          .editReply({
+            embeds: [card({ description: `${working}. ${num(changed + skipped + failed)} of ${num(targets.length)} done.`, footer: 'Roles' })],
+          })
           .catch(() => {});
       }
     }
 
-    const embed = new EmbedBuilder()
-      .setColor(failed > 0 ? COLORS.warn : COLORS.ok)
-      .setTitle(action === 'remove' ? '✅ Role removed from everyone' : '✅ Role given to everyone')
-      .setDescription(`<@&${role.id}> • ${targets.length} member${targets.length === 1 ? '' : 's'}${bots ? ' (bots included)' : ' (bots skipped)'}`)
-      .addFields(
-        { name: action === 'remove' ? 'Removed' : 'Given', value: String(changed), inline: true },
-        { name: action === 'remove' ? 'Did not have it' : 'Already had it', value: String(skipped), inline: true },
-        { name: 'Failed', value: String(failed), inline: true },
-      )
-      .setFooter({ text: `35xw • /f by ${interaction.user.username}` })
-      .setTimestamp();
-    if (failures.length) embed.addFields({ name: 'Errors (first few)', value: failures.join('\n').slice(0, 1024) });
+    const removing = action === 'remove';
+    const embed = card({
+      title: removing ? 'Role removed from everyone' : 'Role given to everyone',
+      description: `Checked ${num(targets.length)} ${targets.length === 1 ? 'member' : 'members'} for ${mention.role(role.id)}. Bots ${bots ? 'included' : 'skipped'}.`,
+      fields: [
+        field(removing ? 'Removed' : 'Given', num(changed), true),
+        field(removing ? 'Did not have it' : 'Already had it', num(skipped), true),
+        field('Failed', num(failed), true),
+        ...(failures.length ? [field('First errors', lines(failures, { max: 5, limit: 1024 }))] : []),
+      ],
+      tone: failed > 0 ? 'warn' : 'ok',
+      footer: 'Roles',
+    });
 
-    return interaction.editReply({ content: '', embeds: [embed] });
+    return interaction.editReply({ embeds: [embed] });
   },
 
   // exported for tests

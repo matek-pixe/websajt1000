@@ -215,3 +215,60 @@ test('per-guild auto role set via /aa persists and takes priority in ensureAutoR
     rm(dir);
   }
 });
+
+test('/aa shows the current setting, saves a role and warns when the bot role sits too low', async () => {
+  const dir = tmpDir();
+  try {
+    const roleMemory = new RoleMemoryService(new Storage(path.join(dir, 'db.json')), { id: '', name: 'Member' });
+    const autorole = require('../src/commands/autorole');
+    const ctx = { isManager: () => false, roleMemory, refundCooldown() {} };
+    const guild = {
+      id: 'G',
+      ownerId: 'OWNER',
+      roles: { cache: new Map([['low', { id: 'low' }]]) },
+      members: { me: { roles: { highest: { position: 5 } } } },
+    };
+    const run = async (user, role) => {
+      const replies = [];
+      await autorole.execute(
+        {
+          user: { id: user, username: user },
+          guild,
+          options: { getRole: () => role },
+          reply: async (p) => replies.push(p),
+        },
+        ctx,
+      );
+      return replies[0];
+    };
+    const body = (r) => r.embeds[0].toJSON();
+
+    // not the owner
+    assert.ok(body(await run('X', null)).description.includes('Only the server owner'));
+
+    // nothing set yet
+    let out = body(await run('OWNER', null));
+    assert.equal(out.title, 'Auto role');
+    assert.ok(out.description.includes('No auto role is set'));
+
+    // @everyone and managed roles are refused
+    assert.ok(body(await run('OWNER', { id: 'G', position: 0, managed: false })).description.includes('@everyone'));
+    assert.ok(body(await run('OWNER', { id: 'm', position: 1, managed: true })).description.includes('managed'));
+    assert.equal(roleMemory.getGuildAutoRole('G'), null);
+
+    // a role below the bot is saved, no warning field
+    let r = await run('OWNER', { id: 'low', position: 2, managed: false });
+    assert.equal(r.flags, 64);
+    assert.equal(roleMemory.getGuildAutoRole('G'), 'low');
+    assert.equal(body(r).fields, undefined);
+    assert.ok(body(await run('OWNER', null)).description.includes('<@&low>'));
+
+    // a role above the bot is saved too, with the drag instruction
+    out = body(await run('OWNER', { id: 'high', position: 9, managed: false }));
+    assert.equal(roleMemory.getGuildAutoRole('G'), 'high');
+    assert.ok(out.fields[0].value.includes('Drag the bot role above that role in Server Settings, Roles'));
+    assert.ok(body(await run('OWNER', null)).description.includes('no longer exists'));
+  } finally {
+    rm(dir);
+  }
+});

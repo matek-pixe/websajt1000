@@ -1,17 +1,15 @@
 'use strict';
 
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { COLORS } = require('./_shared');
+const { SlashCommandBuilder } = require('discord.js');
+const { card, field, mention, num } = require('../ui');
 
-const MEDALS = ['🥇', '🥈', '🥉'];
-
-/** Render a "top users" leaderboard as a nice, mention-based list. */
+/** Render a top list, one member per line. */
 function renderLeaderboard(top) {
-  if (!top || top.length === 0) return '_Nitko još nije koristio ovu komandu._';
+  if (!top || top.length === 0) return 'Nobody yet.';
   return top
     .map((entry, i) => {
-      const rank = MEDALS[i] || `**${i + 1}.**`;
-      return `${rank} <@${entry.userId}> — **${entry.count}**`;
+      const rank = `**${i + 1}.**`;
+      return `${rank} ${mention.user(entry.userId)} **${num(entry.count)}**`;
     })
     .join('\n');
 }
@@ -21,7 +19,7 @@ module.exports = {
   requiresVerified: true, // only members holding the VERIFIED role (given after a ticket)
   data: new SlashCommandBuilder()
     .setName('stats')
-    .setDescription('Prikaži "Rastrošan" statistiku servera i najveće potrošače.'),
+    .setDescription('Show the Rastrošan board and the top members'),
 
   async execute(interaction, ctx) {
     const guild = interaction.guild;
@@ -35,29 +33,21 @@ module.exports = {
       memberCount = fetched ? fetched.size : 0;
     }
 
-    const totalSteam = steam.given;
-    const totalFivem = fivem.given;
-
-    const embed = new EmbedBuilder()
-      .setColor(COLORS.info)
-      .setTitle('💸 Rastrošan')
-      .setDescription(`Statistika servera **${guild.name}** i najveći potrošači računa.`)
-      .addFields(
-        { name: '👥 Članova na serveru', value: String(memberCount), inline: true },
-        { name: '🎮 Podijeljeno Steam', value: String(totalSteam), inline: true },
-        { name: '🚗 Podijeljeno FiveM', value: String(totalFivem), inline: true },
-        { name: '🎮 Najviše /steam', value: renderLeaderboard(steam.top), inline: false },
-        { name: '🚗 Najviše /5m', value: renderLeaderboard(fivem.top), inline: false },
-        {
-          name: '📦 Zaliha',
-          value: `Steam slobodno: **${steam.available}**\nFiveM slobodno: **${fivem.available}**`,
-          inline: false,
-        },
-      )
-      .setFooter({ text: '35xw • Rastrošan' })
-      .setTimestamp();
-
-    if (guild.iconURL()) embed.setThumbnail(guild.iconURL({ size: 256 }));
+    const embed = card({
+      title: 'Rastrošan',
+      description: `**${guild.name}**\nWho took the most accounts from the pool.`,
+      fields: [
+        field('Members', num(memberCount), true),
+        field('Steam given', num(steam.given), true),
+        field('FiveM given', num(fivem.given), true),
+        field('Top for /steam', renderLeaderboard(steam.top)),
+        field('Top for /5m', renderLeaderboard(fivem.top)),
+        field('In the pool', `Steam **${num(steam.available)}**\nFiveM **${num(fivem.available)}**`),
+      ],
+      footer: 'stats',
+      timestamp: true,
+      thumbnail: guild.iconURL({ size: 256 }),
+    });
 
     // Public on purpose: the Rastrošan board is a server leaderboard everyone should see.
     await interaction.reply({ embeds: [embed] });

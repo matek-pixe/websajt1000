@@ -15,7 +15,7 @@ gives everyone an **auto role** on join, **remembers each member's roles** by th
 | `/combo` | **verified** | Gives you one Steam **and** one FiveM account together, one below the other, each split into labelled lines (username / e-mail / password / extra). |
 | `/help` | **verified** | Lists every command and how to use it. |
 | `/stats` | **verified** | Posts the **Rastrošan** embed: member count + top `/steam` and top `/5m` users (separately). |
-| `/setup` | **server owner** | Builds (or repairs) the whole server layout in one go — see *Server setup* below. Re-runnable, never deletes anything. |
+| `/setup server` | **server owner** | Rebuilds the whole server layout and roles after a preview and a confirmation. Keeps `osjetljivo`, the tickets category, the `+` role and other protected roles. See *Server setup* below. |
 | `/aa` | **server owner** | Sets the role every new member gets on **this** server, e.g. `/aa @Member`. Run with no role to see the current setting. |
 | `/f role` | **admins** | Gives a role to **every member** of the server (bots skipped unless `bots:true`). `action:Remove` takes it away from everyone. Shows progress and a summary. |
 | `/roles` | **staff** | Shows the roles the bot remembers for a user (`user:` or paste an `id:` of someone who left) and whether it can restore them, with the reason if not. |
@@ -29,10 +29,10 @@ gives everyone an **auto role** on join, **remembers each member's roles** by th
 | `/ping` | **verified** | Bot latency. |
 
 - **verified** = members holding the VERIFIED role (the role staff hands out after a ticket; see
-  `/setup`). The manager, people with bypass, the server owner and admins always pass. On a server
-  where no VERIFIED role is known yet (no `/setup`, and the `.env` id does not exist there) those
+  `/setup server`). The manager, people with bypass, the server owner and admins always pass. On a server
+  where no VERIFIED role is known yet (no `/setup server`, and the `.env` id does not exist there) those
   commands stay open to everyone.
-- **server owner** commands (`/n`, `/setup`) also work for the manager, but for no admin.
+- **server owner** commands (`/n`, `/setup server`) also work for the manager, but for no admin.
 - Every command has a **30‑second cooldown per user** (configurable via `COOLDOWN_SECONDS`).
 - Account replies are **ephemeral** – only the person who ran the command can see the account.
 - The **manager** is the only person allowed to refill accounts or hand out bypass. The manager is
@@ -102,33 +102,60 @@ cooldowns survive restarts.
 stored per server, so each server starts at `ticket-0001` and never interferes with another. (Only the Steam/FiveM account pools are shared, on purpose, so the same account can
 never be handed out twice anywhere.)
 
-### Server setup (`/setup`)
+### Server setup (`/setup server`)
 
-`/setup` lays out the whole server the way 35xw expects it, and can be run again any time to check
-and repair what is already there. It **never deletes** a channel or a role; it adopts what exists
-(matching by name, ignoring emoji and decoration), renames it to the `emoji ıl NAME` style, moves it
-into the right category and fixes its permissions, and creates whatever is missing.
+`/setup server` replaces the server layout with the 35xw template. It is a rebuild, not a repair:
+everything that is not protected is deleted and created again. Because that cannot be undone, it
+works in two steps.
+
+1. **Preview.** The command lists what stays, what will be deleted, what will be created and who
+   gets access. Nothing has changed at this point. Only the server owner (and the bot manager) can
+   see it and press the buttons.
+2. **Confirm.** *Rebuild server* starts the work, *Cancel* drops it. The confirmation is single use
+   and expires after ten minutes.
+
+The order of work keeps a failure harmless: roles first, then **every new channel is built**, and
+only after that the old channels and roles from the preview are deleted. If building fails, the new
+channels are removed again and nothing old is deleted. Only what the preview listed is ever
+deleted, so a channel created after the preview survives.
+
+**What always stays**
+
+- The `osjetljivo` category with everything inside it, exactly as it is (name and permissions are
+  never edited). Add more with the `keep` option or `SETUP_KEEP_CATEGORIES`. If no such category
+  exists, the command refuses to run.
+- The tickets category with open tickets and `#transcripts`, so ticket history is never lost.
+- The `+` role (matched by its exact name) and the verified role, the role that gives access to
+  `osjetljivo`, the website roles (`WEB_ROLE_ID`), the auto role, every role with Administrator,
+  managed roles and roles above the bot. Extra ids go in `SETUP_PROTECTED_ROLE_IDS`.
+- Channels Discord refuses to delete on Community servers (rules and updates).
+
+**What the template creates**
 
 | Where | What | Who sees it |
 | --- | --- | --- |
-| top | `🌐 ıl 35xw.top` | everyone, read-only (a reminder of the website) |
-| `✅ ıl VERIFY` | `🎫 ıl VERIFY` with the **35xw verification** panel | every new member; **hidden from VERIFIED** members; staff still sees it; nobody can type, only press the button |
-| `🎫 Tickets` | ticket channels + `#transcripts` | staff, admins and the owner only; each ticket is still visible to the person who opened it |
-| `🌍 ıl GENERAL` | `💬 ıl CHAT`, `🤖 ıl CMDS`, `📢 ıl SERVER`, `🗑️ ıl DUMP` | VERIFIED members only |
-| `🔊 ıl VOICE` | `🔊 ıl VOICE #1`, `#2`, `#3` | VERIFIED members only |
-| `🔒 ıl PRIVATE` | `🔒 ıl PRIV` (voice) and `🔒 ıl PRIV-CHAT` | the server owner and the CO-OWNER role only |
-| `🔐 ıl OSJETLJIVO` | whatever channels are already inside it (all synced to the category) | the sensitive role only |
+| top | `🌐 ıl 35xw.top` (voice) | everyone, nobody can join, a reminder of the website |
+| `🔒 ıl PRIVATE` | `🔒 ıl PRIV-CHAT`, `🔒 ıl PRIV` (voice) | the server owner and the priv role; admins always see it |
+| `✅ ıl VERIFY` | `🎫 ıl VERIFY` with the **35xw verification** panel | everyone can read it and press the button; **hidden from verified members** |
+| `🎫 Tickets` | ticket channels and `#transcripts` | staff and admins; each ticket also shows to its opener |
+| `🌍 ıl GENERAL` | `💬 ıl CHAT`, `🤖 ıl CMDS`, `📢 ıl SERVER`, `🗑️ ıl DUMP` | verified members |
+| `🔊 ıl VOICE` | `🔊 ıl VOICE #1`, `#2`, `#3` | verified members |
+| last | `osjetljivo` | unchanged |
 
-Roles: it uses the VERIFIED and sensitive roles from `.env` (`SETUP_VERIFIED_ROLE_ID`,
-`SETUP_SENSITIVE_ROLE_ID`) when they exist on the server, otherwise the ones you pass as options
-(`/setup verified:@Role staff:@Role coowner:@Role sensitive:@Role`), otherwise it creates them:
-`✅ ıl VERIFIED`, `🎫 ıl TICKET SUPPORT` (also becomes the ticket staff role), `👑 ıl CO-OWNER`,
-`🤝 ıl FRIEND`, `💎 ıl VIP`, plus a **blank role** (invisible name, not shown separately from members). Managed roles are renamed
-to the same style unless you pass `style_roles:false`; the sensitive role is never renamed.
+**Roles.** The verified role is, in this order: the one chosen with `verified`, the id in
+`SETUP_VERIFIED_ROLE_ID`, the role named `+`, the one from the last run, otherwise a new
+`✅ ıl VERIFIED`. It is never renamed. Roles named like the template ones are reused and renamed in
+place, so members keep them: `👑 ıl CO-OWNER`, `🎫 ıl SUPPORT` (this becomes the ticket staff role),
+`💎 ıl VIP`, `🤝 ıl FRIEND` and an invisible-named separator role that is not shown apart from
+members. Anything missing is created. They are stacked directly above the verified role. Priv access
+goes to the `priv_role` you pass, otherwise to `👑 ıl CO-OWNER`.
 
-The bot needs **Administrator** (or Manage Channels + Manage Roles) and its role must sit above the
-roles it manages. The summary tells you what was created, repaired or left as is, and warns if the
-auto role (`/aa`) is the VERIFIED role, since new members would then skip verification.
+**Options:** `verified`, `priv_role`, `keep` (an extra category to keep) and `delete_roles`
+(`false` leaves every role alone).
+
+The bot needs **Administrator** (or Manage Channels and Manage Roles) and its role must sit above
+the roles it renames, deletes and reorders. If the channel the command ran in is deleted, the
+summary is sent to the owner as a direct message.
 
 ### Website gated by a Discord role
 

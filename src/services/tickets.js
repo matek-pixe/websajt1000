@@ -12,6 +12,7 @@ const {
   MessageReferenceType,
 } = require('discord.js');
 const { renderTranscriptHtml, formatSpan } = require('./transcriptHtml');
+const { mention, plural } = require('../ui');
 
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
 function setOwn(obj, key, value) {
@@ -172,13 +173,13 @@ function panelEmbed() {
   return new EmbedBuilder()
     .setColor(TICKET_COLORS.blend)
     .setTitle('35xw verification')
-    .setDescription('To get access to the server open a ticket');
+    .setDescription('Open a ticket to get access to the server.');
 }
 
 function welcomeEmbed() {
   return new EmbedBuilder()
     .setColor(TICKET_COLORS.blend)
-    .setDescription('Please wait for your role, our moderators will be here shortly.');
+    .setDescription('Wait here for your role. Staff will be with you shortly.');
 }
 
 // ---------- service ----------
@@ -350,7 +351,7 @@ class TicketService {
         type: ChannelType.GuildText,
         parent: category.id,
         permissionOverwrites: this._baseOverwrites(guild),
-        topic: '📄 35xw ticket transcripts',
+        topic: '35xw ticket transcripts',
         reason: '35xw transcripts channel',
       });
     }
@@ -398,7 +399,7 @@ class TicketService {
         type: ChannelType.GuildText,
         parent: category.id,
         permissionOverwrites: overwrites,
-        topic: `Ticket #${pad4(number)} • opened by ${member.user.tag}`,
+        topic: `Ticket #${pad4(number)} · opened by ${member.user.tag}`,
         reason: `35xw ticket #${pad4(number)} opened by ${member.user.tag}`,
       });
 
@@ -454,17 +455,17 @@ class TicketService {
     const file = new AttachmentBuilder(Buffer.from(html, 'utf8'), { name: `${formatTranscriptName(ticket.number)}.html` });
     const embed = new EmbedBuilder()
       .setColor(TICKET_COLORS.transcript)
-      .setTitle(`📄 Transcript — ${formatTicketName(ticket.number)}`)
+      .setTitle(`📄 Transcript for ${formatTicketName(ticket.number)}`)
       .setDescription('Open the attached **.html** file in a browser to read the full conversation.')
       .addFields(
-        { name: '🎫 Ticket', value: formatTicketName(ticket.number), inline: true },
-        { name: '👤 Opened by', value: `<@${ticket.userId}>`, inline: true },
-        { name: '🔒 Closed by', value: `<@${closer.id}>`, inline: true },
-        { name: '💬 Messages', value: String(messages.length), inline: true },
-        { name: '⏱️ Duration', value: formatSpan(closedAt - ticket.openedAt), inline: true },
-        { name: '🕒 Opened', value: `<t:${Math.floor(ticket.openedAt / 1000)}:f>`, inline: true },
+        { name: 'Ticket', value: formatTicketName(ticket.number), inline: true },
+        { name: 'Opened by', value: `<@${ticket.userId}>`, inline: true },
+        { name: 'Closed by', value: `<@${closer.id}>`, inline: true },
+        { name: 'Messages', value: String(messages.length), inline: true },
+        { name: 'Duration', value: formatSpan(closedAt - ticket.openedAt), inline: true },
+        { name: 'Opened', value: `<t:${Math.floor(ticket.openedAt / 1000)}:f>`, inline: true },
       )
-      .setFooter({ text: '35xw • tickets' })
+      .setFooter({ text: '35xw · tickets' })
       .setTimestamp(closedAt);
 
     const target = await this.ensureTranscriptChannel(guild);
@@ -494,7 +495,7 @@ class TicketService {
             new EmbedBuilder()
               .setColor(TICKET_COLORS.closed)
               .setDescription(
-                `🔒 Ticket closed by <@${closer.id}>\n📄 Saving the transcript… this channel will be deleted in **${secs} seconds**.`,
+                `Ticket closed by ${mention.user(closer.id)}.\nSaving the transcript. This channel will be deleted in **${plural(secs, 'second')}**.`,
               ),
           ],
         })
@@ -506,7 +507,7 @@ class TicketService {
         saved = await this.saveTranscript(channel, t, closer, closedAt);
       } catch (err) {
         await channel
-          .send({ content: `⚠️ Could not save the transcript (${err.message}). The ticket was **not** deleted, please try again.` })
+          .send({ content: `Could not save the transcript (${err.message}). The ticket was not deleted. Try closing it again.` })
           .catch(() => {});
         return { ok: false, reason: 'transcript_failed', error: err };
       }

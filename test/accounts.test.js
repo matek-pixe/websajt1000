@@ -168,3 +168,188 @@ test('a __proto__ line in the file cannot poison the given registry', () => {
     rm(dir);
   }
 });
+
+// ---------- command wording (giveAccount and doRefill) ----------
+
+const { giveAccount, doRefill } = require('../src/commands/_shared');
+
+function fakeReply({ attachment, failEdit = false } = {}) {
+  const st = { edits: [], replies: [], deferred: false };
+  return {
+    user: { id: '42', username: 'matija' },
+    deferred: false,
+    replied: false,
+    options: { getAttachment: () => attachment },
+    async deferReply() {
+      st.deferred = true;
+      this.deferred = true;
+      return {};
+    },
+    async reply(p) {
+      st.replies.push(p);
+      this.replied = true;
+      return {};
+    },
+    async editReply(p) {
+      if (failEdit) throw new Error('network down');
+      st.edits.push(p);
+      return {};
+    },
+    _st: st,
+  };
+}
+
+const ctxFor = (accounts, extra = {}) => {
+  const c = { accounts, refunded: 0, refundCooldown() { c.refunded += 1; }, config: { maxRefillFileBytes: 5 * 1024 * 1024 }, ...extra };
+  return c;
+};
+const sent = (i) => (i._st.edits.at(-1) || i._st.replies.at(-1)).embeds[0].toJSON();
+
+test('giveAccount sends a green card with the account in a code block', async () => {
+  const { dir, accounts } = svc();
+  try {
+    accounts.refill('steam', 'gamer:pw1', user(0));
+    const i = fakeReply();
+    const ctx = ctxFor(accounts);
+    await giveAccount(i, ctx, 'steam');
+
+    const e = sent(i);
+    assert.equal(e.title, '🎮 Steam account');
+    assert.equal(e.description, 'This account is yours alone and was never given out before.');
+    assert.equal(e.color, 0x3ba55d);
+    assert.equal(e.fields[0].name, 'Details');
+    assert.equal(e.fields[0].value, '```\n' + formatAccount('gamer:pw1') + '\n```');
+    assert.equal(e.footer.text, '35xw · Steam');
+    assert.equal(ctx.refunded, 0);
+  } finally {
+    rm(dir);
+  }
+});
+
+test('giveAccount on an empty pool sends a warning card and refunds the cooldown', async () => {
+  const { dir, accounts } = svc();
+  try {
+    const i = fakeReply();
+    const ctx = ctxFor(accounts);
+    await giveAccount(i, ctx, 'fivem');
+
+    const e = sent(i);
+    assert.equal(e.title, '🚗 No FiveM accounts left');
+    assert.ok(e.description.includes('The pool is empty'));
+    assert.ok(e.description.includes('manager'));
+    assert.equal(e.color, 0xfaa61a);
+    assert.equal(ctx.refunded, 1);
+  } finally {
+    rm(dir);
+  }
+});
+
+test('giveAccount puts the account back and refunds when delivery fails', async () => {
+  const { dir, accounts } = svc();
+  try {
+    accounts.refill('steam', 'a:1', user(0));
+    const i = fakeReply({ failEdit: true });
+    const ctx = ctxFor(accounts);
+    const quiet = console.error;
+    console.error = () => {};
+    try {
+      await assert.rejects(() => giveAccount(i, ctx, 'steam'), /network down/);
+    } finally {
+      console.error = quiet;
+    }
+    assert.equal(accounts.stats('steam').available, 1);
+    assert.equal(ctx.refunded, 1);
+  } finally {
+    rm(dir);
+  }
+});
+
+test('doRefill reports the counts on a card and notes a different file name', async () => {
+  const { dir, accounts } = svc();
+  const realFetch = globalThis.fetch;
+  try {
+    accounts.refill('steam', 'old:1', user(0));
+    accounts.claim('steam', user(1)); // old:1 is now given out
+    globalThis.fetch = async () => ({ ok: true, text: async () => 'old:1\nnew:1\nnew:1\nnew:2' });
+    const i = fakeReply({ attachment: { name: 'list.txt', size: 40, url: 'https://cdn.example/list.txt' } });
+    const ctx = ctxFor(accounts);
+    await doRefill(i, ctx, 'steam');
+
+    const e = sent(i);
+    assert.equal(e.title, '🎮 Steam pool refilled');
+    assert.ok(e.description.startsWith('Uploaded by <@42>.'));
+    assert.ok(e.description.includes('`list.txt`') && e.description.includes('`steam.txt`'));
+    assert.equal(e.color, 0x3ba55d);
+    assert.deepEqual(
+      e.fields.map((f) => [f.name, f.value]),
+      [
+        ['Added', '2'],
+        ['In stock', '2'],
+        ['Given out so far', '1'],
+        ['Already in stock', '0'],
+        ['Already given', '1'],
+        ['Duplicates in file', '1'],
+      ],
+    );
+    assert.equal(e.footer.text, '35xw · steam.txt');
+  } finally {
+    globalThis.fetch = realFetch;
+    rm(dir);
+  }
+});
+
+test('doRefill with nothing new is a warning card and has no file name note when it matches', async () => {
+  const { dir, accounts } = svc();
+  const realFetch = globalThis.fetch;
+  try {
+    accounts.refill('fivem', 'a:1', user(0));
+    globalThis.fetch = async () => ({ ok: true, text: async () => 'a:1' });
+    const i = fakeReply({ attachment: { name: 'FiveM.txt', size: 3, url: 'https://cdn.example/fivem.txt' } });
+    await doRefill(i, ctxFor(accounts), 'fivem');
+
+    const e = sent(i);
+    assert.equal(e.description, 'Uploaded by <@42>.');
+    assert.equal(e.color, 0xfaa61a);
+    assert.equal(e.fields[0].value, '0');
+  } finally {
+    globalThis.fetch = realFetch;
+    rm(dir);
+  }
+});
+
+test('doRefill refuses a file over the limit and refunds the cooldown', async () => {
+  const { dir, accounts } = svc();
+  try {
+    const i = fakeReply({ attachment: { name: 'steam.txt', size: 6 * 1024 * 1024, url: 'x' } });
+    const ctx = ctxFor(accounts);
+    await doRefill(i, ctx, 'steam');
+
+    assert.equal(i._st.deferred, false); // refused before deferring
+    const e = sent(i);
+    assert.ok(e.description.includes('5 MB'));
+    assert.equal(e.color, 0xed4245);
+    assert.equal(ctx.refunded, 1);
+  } finally {
+    rm(dir);
+  }
+});
+
+test('doRefill explains a failed download and refunds the cooldown', async () => {
+  const { dir, accounts } = svc();
+  const realFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => ({ ok: false, status: 404 });
+    const i = fakeReply({ attachment: { name: 'steam.txt', size: 10, url: 'https://cdn.example/gone.txt' } });
+    const ctx = ctxFor(accounts);
+    await doRefill(i, ctx, 'steam');
+
+    const e = sent(i);
+    assert.ok(e.description.startsWith('Could not download the file (HTTP 404).'));
+    assert.equal(e.color, 0xed4245);
+    assert.equal(ctx.refunded, 1);
+    assert.equal(accounts.stats('steam').available, 0);
+  } finally {
+    globalThis.fetch = realFetch;
+    rm(dir);
+  }
+});

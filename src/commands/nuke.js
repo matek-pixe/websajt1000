@@ -4,13 +4,11 @@ const {
   SlashCommandBuilder,
   PermissionFlagsBits,
   ChannelType,
-  EmbedBuilder,
   ButtonBuilder,
   ButtonStyle,
   ActionRowBuilder,
-  MessageFlags,
 } = require('discord.js');
-const { COLORS, ephemeral } = require('./_shared');
+const { card, field, ephemeral, deny, warn, mention, num, lines, COPY } = require('../ui');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -30,7 +28,7 @@ async function ensureKeeper(guild, name) {
   );
   if (existing) return existing;
   try {
-    return await guild.channels.create({ name, type: ChannelType.GuildText, reason: '35xw /n – kanal koji ostaje' });
+    return await guild.channels.create({ name, type: ChannelType.GuildText, reason: '35xw /n: channel to keep' });
   } catch (err) {
     console.warn(`[nuke] Cannot create keeper channel "${name}": ${err.message}`);
     return null;
@@ -43,11 +41,10 @@ async function performNuke(interaction, ctx) {
 
   const keeper = await ensureKeeper(guild, ctx.config.finalChannelName);
   if (!keeper) {
-    return ephemeral(interaction, {
-      content: `❌ Ne mogu napraviti/pronaći kanal \`${ctx.config.finalChannelName}\`. Provjeri da bot ima **Manage Channels**.`,
-      components: [],
-      embeds: [],
-    });
+    return deny(
+      interaction,
+      `Could not find or create a channel named ${ctx.config.finalChannelName}. Give the bot the Manage Channels permission and run /n again.`,
+    );
   }
 
   // Everything except the keeper. Delete categories last so nothing is orphaned mid-run.
@@ -63,11 +60,11 @@ async function performNuke(interaction, ctx) {
   const failed = [];
   for (const channel of targets) {
     if (isUndeletable(guild, channel)) {
-      failed.push(`${channel.name} (obavezan Community kanal)`);
+      failed.push(`${channel.name} (required by Community)`);
       continue;
     }
     try {
-      await channel.delete('35xw /n – brisanje svih kanala');
+      await channel.delete('35xw /n: delete all channels');
       deleted += 1;
     } catch (err) {
       failed.push(`${channel.name} (${err.message})`);
@@ -75,34 +72,34 @@ async function performNuke(interaction, ctx) {
     await sleep(ctx.config.nukeDelayMs);
   }
 
-  const doneEmbed = new EmbedBuilder()
-    .setColor(COLORS.danger)
-    .setTitle('💥 Završeno')
-    .setDescription(
-      `Svi kanali su obrisani jedan po jedan.\nOstao je samo ovaj kanal: <#${keeper.id}>.`,
-    )
-    .addFields(
-      { name: 'Obrisano', value: String(deleted), inline: true },
-      { name: 'Preskočeno', value: String(failed.length), inline: true },
-    )
-    .setFooter({ text: `35xw • /n • ${interaction.user.username}` })
-    .setTimestamp();
+  const doneCard = card({
+    title: 'Server cleared',
+    description: 'Every channel was deleted one by one, except this one.',
+    fields: [
+      field('Deleted', num(deleted), true),
+      field('Not deleted', num(failed.length), true),
+      field('Run by', mention.user(interaction.user.id), true),
+    ],
+    tone: 'ok',
+    footer: 'channels',
+    timestamp: true,
+  });
 
-  await keeper.send({ embeds: [doneEmbed] }).catch(() => {});
+  await keeper.send({ embeds: [doneCard] }).catch(() => {});
 
-  const summary = new EmbedBuilder()
-    .setColor(deleted > 0 ? COLORS.ok : COLORS.warn)
-    .setTitle('✅ /n gotovo')
-    .setDescription(`Ostao je kanal <#${keeper.id}> ("${ctx.config.finalChannelName}").`)
-    .addFields(
-      { name: 'Obrisano kanala', value: String(deleted), inline: true },
-      { name: 'Nije obrisano', value: String(failed.length), inline: true },
-    );
-  if (failed.length > 0) {
-    summary.addFields({ name: 'Nije obrisano (razlog)', value: failed.slice(0, 10).join('\n').slice(0, 1024) });
-  }
+  const summary = card({
+    title: deleted > 0 ? 'Channels deleted' : 'No channels deleted',
+    description: `The channel ${mention.channel(keeper.id)} was kept.`,
+    fields: [
+      field('Deleted', num(deleted), true),
+      field('Not deleted', num(failed.length), true),
+      ...(failed.length > 0 ? [field('Details', lines(failed, { max: 10, limit: 1024 }))] : []),
+    ],
+    tone: deleted > 0 ? 'ok' : 'warn',
+    footer: 'channels',
+  });
 
-  // The interaction token can expire on very large servers; the public "Završeno" message above
+  // The interaction token can expire on very large servers; the public message above
   // is the real confirmation, so a failed ephemeral edit here is not fatal.
   return ephemeral(interaction, { embeds: [summary], components: [] }).catch(() => {});
 }
@@ -113,32 +110,30 @@ module.exports = {
   buttonPrefix: 'n:',
   data: new SlashCommandBuilder()
     .setName('n')
-    .setDescription('VLASNIK: obriši SVE kanale i ostavi samo jedan tekstualni kanal "zavrseno".')
+    .setDescription('Delete every channel except zavrseno (owner only)')
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
   async execute(interaction, ctx) {
     const confirm = new ButtonBuilder()
       .setCustomId('n:confirm')
-      .setLabel('DA, obriši sve')
-      .setStyle(ButtonStyle.Danger)
-      .setEmoji('💥');
+      .setLabel('Delete everything')
+      .setStyle(ButtonStyle.Danger);
     const cancel = new ButtonBuilder()
       .setCustomId('n:cancel')
-      .setLabel('Odustani')
+      .setLabel('Cancel')
       .setStyle(ButtonStyle.Secondary);
     const row = new ActionRowBuilder().addComponents(confirm, cancel);
 
-    const embed = new EmbedBuilder()
-      .setColor(COLORS.danger)
-      .setTitle('⚠️ Jesi li siguran?')
-      .setDescription(
-        `Ovo će **obrisati SVE kanale** na serveru, jedan po jedan, i ostaviti samo ` +
-          `jedan tekstualni kanal **"${ctx.config.finalChannelName}"**.\n\nOvo se ne može poništiti.\n\n` +
-          `ℹ️ Na Community serverima Discord ne dopušta brisanje obaveznih kanala (pravila i ` +
-          `objave za zajednicu), pa oni ostaju uz "${ctx.config.finalChannelName}".`,
-      );
+    const embed = card({
+      title: 'Delete every channel?',
+      description:
+        `Every channel on the server will be deleted one by one. Only a text channel named **${ctx.config.finalChannelName}** stays. ` +
+        'This cannot be undone.\n\n' +
+        'On Community servers Discord keeps the rules and updates channels, so those stay too.',
+      footer: 'channels',
+    });
 
-    await interaction.reply({ embeds: [embed], components: [row], flags: MessageFlags.Ephemeral });
+    await ephemeral(interaction, { embeds: [embed], components: [row] });
     // The cooldown is only spent once the manager actually confirms.
     ctx.refundCooldown();
   },
@@ -146,13 +141,12 @@ module.exports = {
   /** Handle the confirm / cancel buttons. */
   async handleButton(interaction, ctx) {
     if (!ctx.isOwnerOrManager()) {
-      return interaction.reply({ content: '⛔ Samo vlasnik servera smije koristiti ovo.', flags: MessageFlags.Ephemeral });
+      return deny(interaction, COPY.ownerOnly('n'));
     }
 
     if (interaction.customId === 'n:cancel') {
       return interaction.update({
-        content: '✅ Otkazano. Ništa nije obrisano.',
-        embeds: [],
+        embeds: [card({ title: 'Nothing deleted', description: 'Every channel is still in place.', footer: 'channels' })],
         components: [],
       });
     }
@@ -162,20 +156,22 @@ module.exports = {
       const key = `n:${interaction.user.id}`;
       const left = ctx.isBypass(interaction.user) ? 0 : ctx.cooldown.remaining(key);
       if (left > 0) {
-        return interaction.reply({
-          content: `⏳ Pričekaj još ${Math.ceil(left / 1000)}s prije ponovnog /n.`,
-          flags: MessageFlags.Ephemeral,
-        });
+        return deny(interaction, COPY.cooldown(Math.ceil(left / 1000), 'n'));
       }
       if (nukingGuilds.has(interaction.guildId)) {
-        return interaction.reply({ content: '⏳ Brisanje je već u tijeku…', flags: MessageFlags.Ephemeral });
+        return warn(interaction, 'A deletion is already running on this server. Wait for it to finish.');
       }
       ctx.cooldown.hit(key);
       nukingGuilds.add(interaction.guildId);
 
       await interaction.update({
-        content: '💥 Brišem sve kanale, jedan po jedan…',
-        embeds: [],
+        embeds: [
+          card({
+            title: 'Deleting channels',
+            description: 'Working through the server one channel at a time. The result appears here when it is done.',
+            footer: 'channels',
+          }),
+        ],
         components: [],
       });
       try {

@@ -1,19 +1,19 @@
 'use strict';
 
-const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, MessageFlags } = require('discord.js');
 const { POOL_TYPES, formatAccount } = require('../services/accounts');
-const { COLORS } = require('./_shared');
+const { card, field, codeBlock, joinList } = require('../ui');
 
 const ORDER = ['steam', 'fivem'];
 
 /**
- * /combo — one Steam and one FiveM account together, one below the other.
+ * /combo: one Steam and one FiveM account together, one below the other.
  * Same rules as /steam and /5m: never-given accounts only, cooldown, bypass, rollback on failure.
  */
 module.exports = {
   managerOnly: false,
   requiresVerified: true, // only members holding the VERIFIED role (given after a ticket)
-  data: new SlashCommandBuilder().setName('combo').setDescription('Dobij Steam i FiveM račun odjednom.'),
+  data: new SlashCommandBuilder().setName('combo').setDescription('Get a Steam and a FiveM account at once'),
 
   async execute(interaction, ctx) {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -24,29 +24,31 @@ module.exports = {
       const info = POOL_TYPES[type];
       const account = ctx.accounts.claim(type, interaction.user);
       if (account === null) {
-        fields.push({ name: `${info.emoji} ${info.label}`, value: '_Trenutno nema slobodnih računa u ovoj zalihi._' });
+        fields.push(field(info.label, 'Out of stock'));
       } else {
         taken.push([type, account]);
-        fields.push({ name: `${info.emoji} ${info.label}`, value: '```\n' + formatAccount(account) + '\n```' });
+        fields.push(field(info.label, codeBlock(formatAccount(account))));
       }
     }
 
     if (taken.length === 0) {
       ctx.refundCooldown(); // nothing was handed out, do not burn the cooldown
-      const embed = new EmbedBuilder()
-        .setColor(COLORS.warn)
-        .setTitle('🎁 Nema računa')
-        .setDescription('Obje zalihe su trenutno prazne. Pričekaj da menadžer napuni zalihu pa pokušaj ponovno.');
+      const embed = card({
+        title: 'No accounts left',
+        description: 'Both pools are empty, so try again after the manager refills them.',
+        tone: 'warn',
+        footer: 'combo',
+      });
       return interaction.editReply({ embeds: [embed] });
     }
 
-    const embed = new EmbedBuilder()
-      .setColor(taken.length === ORDER.length ? COLORS.ok : COLORS.warn)
-      .setTitle('🎁 Tvoj combo')
-      .setDescription('Ovi računi su samo tvoji i nikada nisu bili dani nikome drugom. Čuvaj ih.')
-      .addFields(fields)
-      .setFooter({ text: '35xw • combo' })
-      .setTimestamp();
+    const description =
+      taken.length === ORDER.length
+        ? 'Both accounts are yours alone and were never given out before.'
+        : `Only the ${joinList(taken.map(([type]) => POOL_TYPES[type].label))} pool had stock. ` +
+          'That account is yours alone and was never given out before.';
+
+    const embed = card({ title: 'Your combo', description, fields, tone: 'ok', footer: 'combo' });
 
     try {
       return await interaction.editReply({ embeds: [embed] });

@@ -95,26 +95,26 @@ test('/b command: give / remove / list for other people, own switch unchanged', 
     };
 
     let e = await run(null, bob);
-    assert.equal(e.title, '⚡ Bypass given');
+    assert.equal(e.title, 'Bypass granted');
     assert.equal(b.has(bob.id), true);
     assert.equal(b.isEnabled(), false); // own switch untouched
 
     e = await run('list', null);
-    assert.equal(e.title, '⚡ Bypass list');
+    assert.equal(e.title, 'Bypass list');
     assert.ok(e.fields[1].value.includes(`<@${bob.id}>`));
-    assert.ok(e.fields[0].value.includes('OFF'));
+    assert.equal(e.fields[0].value, 'Off');
 
     e = await run('off', bob);
     assert.equal(e.title, 'Bypass removed');
     assert.equal(b.has(bob.id), false);
 
     e = await run('on', bob);
-    assert.equal(e.title, '⚡ Bypass given');
+    assert.equal(e.title, 'Bypass granted');
     assert.equal(b.has(bob.id), true);
 
     // targeting the manager themselves = own switch
     e = await run(null, { id: 'MGR', username: '35bf' });
-    assert.equal(e.title, '⚡ Bypass ON');
+    assert.equal(e.title, 'Bypass on');
     assert.equal(b.isEnabled(), true);
   } finally {
     rm(dir);

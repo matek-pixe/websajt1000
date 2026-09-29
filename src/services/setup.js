@@ -1,27 +1,27 @@
 'use strict';
 
-const { ChannelType, PermissionFlagsBits, PermissionsBitField } = require('discord.js');
+const crypto = require('node:crypto');
+const { ChannelType, OverwriteType, PermissionFlagsBits } = require('discord.js');
 const { panelEmbed, panelRow, BUTTONS } = require('./tickets');
+
+const P = PermissionFlagsBits;
+const T = ChannelType;
 
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
 function setOwn(obj, key, value) {
   Object.defineProperty(obj, key, { value, enumerable: true, writable: true, configurable: true });
 }
 
-const P = PermissionFlagsBits;
-const TEXT_KINDS = [ChannelType.GuildText, ChannelType.GuildAnnouncement];
-const VOICE_KINDS = [ChannelType.GuildVoice];
+/** Every name the layout creates follows "<icon> ıl NAME". */
+const STYLE = (icon, label) => `${icon} ıl ${label}`;
+/** Braille blank: Discord trims ordinary spaces, this renders as an empty name. */
+const BLANK_ROLE_NAME = '⠀';
 
-/** Naming style used for everything /setup creates: "<emoji> ıl NAME". */
-const STYLE = (emoji, label) => `${emoji} ıl ${label}`;
-/** Braille blank: Discord trims real spaces, this survives and renders as an empty name. */
-const BLANK_ROLE_NAME = '\u2800';
-
-// ---------- pure helpers (unit-tested) ----------
+// ---------- pure helpers ----------
 
 /**
- * Reduce a channel/role name to its bare word so decorations never matter when matching what is
- * already on the server: "🎫 ıl VERIFY", "🎫ticket", "VERIFY" and "verify" all compare by word.
+ * Reduce a channel or role name to its bare word so decoration never matters when matching what
+ * already exists: "🎫 ıl VERIFY", "🎫ticket" and "verify" all compare by their letters.
  */
 function normalizeName(s) {
   return String(s || '')
@@ -30,103 +30,70 @@ function normalizeName(s) {
     .replace(/[^a-z0-9#.]+/g, '');
 }
 
-/** True for a role whose name is only whitespace / invisible characters. */
+/** True for a name made only of whitespace and invisible characters. */
 function isBlankName(s) {
-  return /^[\s\u2800\u200b\u200c\u200d\u2060\ufeff]*$/.test(String(s || ''));
+  return /^[\s⠀​‌‍⁠﻿]*$/.test(String(s || ''));
 }
 
+/** The one role the website depends on. Matched by its exact name, never renamed or deleted. */
+const isPlusRole = (role) => String(role && role.name).trim() === '+';
+
+/** Roles the template owns. `match` lists the bare names an existing role may have to be reused. */
 const ROLE_SPECS = Object.freeze({
-  verified: { name: STYLE('✅', 'VERIFIED'), color: 0x57f287, match: ['verified', 'verify', 'verificiran', 'verificirani'] },
-  staff: { name: STYLE('🎫', 'TICKET SUPPORT'), color: 0x5865f2, match: ['ticketsupport', 'support', 'staff', 'ticketstaff'] },
+  verified: { name: STYLE('✅', 'VERIFIED'), color: 0x57f287, match: ['verified', 'verificiran'] },
   coowner: { name: STYLE('👑', 'CO-OWNER'), color: 0xf1c40f, match: ['coowner', 'suvlasnik'] },
-  // Plain member tiers: they just have to exist (no channel permissions attached).
-  friend: { name: STYLE('🤝', 'FRIEND'), color: 0x3498db, match: ['friend', 'friends', 'prijatelj', 'prijatelji'] },
+  support: { name: STYLE('🎫', 'SUPPORT'), color: 0x5865f2, match: ['support', 'ticketsupport', 'staff', 'ticketstaff'] },
   vip: { name: STYLE('💎', 'VIP'), color: 0xe91e63, match: ['vip', 'vips'] },
-  // The sensitive role is whatever the owner already uses for admin-only things: never renamed.
-  sensitive: { name: STYLE('🔐', 'OSJETLJIVO'), color: 0xe74c3c, match: ['osjetljivo', 'sensitive'], noRename: true },
+  friend: { name: STYLE('🤝', 'FRIEND'), color: 0x3498db, match: ['friend', 'friends'] },
   blank: { name: BLANK_ROLE_NAME, color: null, match: [], blank: true },
 });
 
+/** Template roles, lowest first: the order they are stacked in above the verified role. */
+const ROLE_STACK = Object.freeze(['blank', 'friend', 'vip', 'support', 'coowner']);
+
 /**
- * The server layout, top to bottom. `match` lists the bare words an existing channel may have so
- * it is adopted (renamed / moved / re-permissioned) instead of duplicated. `perms` names the
- * permission set from permsFor(). The tickets category is owned by the ticket service.
+ * The server layout from top to bottom. `perms` names a set from permsFor(). The tickets category
+ * belongs to the ticket service, and the kept categories are appended after everything else.
  */
-function buildPlan(siteName) {
-  const T = ChannelType;
-  const voice = (n) => ({
-    key: `voice${n}`,
-    name: STYLE('🔊', `VOICE #${n}`),
-    type: T.GuildVoice,
-    match: [`voice#${n}`, `voice${n}`, `call#${n}`, `call${n}`, 'voice', 'call'],
-    perms: 'verified',
-  });
+function buildLayout(siteName) {
+  const voice = (n) => ({ key: `voice${n}`, name: STYLE('🔊', `VOICE #${n}`), type: T.GuildVoice, perms: 'members' });
   return {
-    top: [
-      {
-        key: 'site',
-        name: STYLE('🌐', siteName),
-        type: T.GuildText,
-        kinds: TEXT_KINDS,
-        match: [siteName, siteName.replace(/\./g, ''), '35xw', 'site', 'stranica', 'website'],
-        perms: 'readonly',
-        anywhere: true,
-      },
-    ],
+    top: [{ key: 'site', name: STYLE('🌐', siteName), type: T.GuildVoice, perms: 'reminder' }],
     categories: [
+      {
+        key: 'private',
+        name: STYLE('🔒', 'PRIVATE'),
+        perms: 'private',
+        channels: [
+          { key: 'priv_chat', name: STYLE('🔒', 'PRIV-CHAT'), type: T.GuildText, perms: 'private', topic: 'Private chat for admins and the priv role.' },
+          { key: 'priv', name: STYLE('🔒', 'PRIV'), type: T.GuildVoice, perms: 'private' },
+        ],
+      },
       {
         key: 'verify',
         name: STYLE('✅', 'VERIFY'),
-        match: ['verify', 'verification', 'verifikacija'],
         perms: 'verify',
         channels: [
-          {
-            key: 'verify_ch',
-            name: STYLE('🎫', 'VERIFY'),
-            type: T.GuildText,
-            match: ['verify', 'ticket', 'verification', 'verifikacija'],
-            perms: 'verify',
-            panel: true,
-          },
+          { key: 'verify_ch', name: STYLE('🎫', 'VERIFY'), type: T.GuildText, perms: 'verify', topic: 'Open a ticket to get access to the server.', panel: true },
         ],
       },
       { key: 'tickets', managed: true },
       {
         key: 'general',
         name: STYLE('🌍', 'GENERAL'),
-        match: ['general', 'main', 'glavno'],
-        perms: 'verified',
+        perms: 'members',
         channels: [
-          { key: 'chat', name: STYLE('💬', 'CHAT'), type: T.GuildText, match: ['chat', 'general'], perms: 'verified' },
-          { key: 'cmds', name: STYLE('🤖', 'CMDS'), type: T.GuildText, match: ['cmds', 'commands', 'cmd', 'botcmds', 'bot'], perms: 'verified' },
-          { key: 'server', name: STYLE('📢', 'SERVER'), type: T.GuildText, match: ['server', 'info'], perms: 'verified' },
-          { key: 'dump', name: STYLE('🗑️', 'DUMP'), type: T.GuildText, match: ['dump', 'spam'], perms: 'verified' },
+          { key: 'chat', name: STYLE('💬', 'CHAT'), type: T.GuildText, perms: 'members', topic: 'General chat for verified members.' },
+          { key: 'cmds', name: STYLE('🤖', 'CMDS'), type: T.GuildText, perms: 'members', topic: 'Bot commands go here.' },
+          { key: 'server', name: STYLE('📢', 'SERVER'), type: T.GuildText, perms: 'members', topic: 'News and info about the server.' },
+          { key: 'dump', name: STYLE('🗑️', 'DUMP'), type: T.GuildText, perms: 'members', topic: 'Anything goes. Media, links, random.' },
         ],
       },
       {
         key: 'voice',
         name: STYLE('🔊', 'VOICE'),
-        match: ['voice', 'call', 'calls', 'voicechannels'],
-        perms: 'verified',
+        perms: 'members',
         channels: [voice(1), voice(2), voice(3)],
-      },
-      {
-        key: 'private',
-        name: STYLE('🔒', 'PRIVATE'),
-        match: ['private', 'priv', 'owner', 'owners'],
-        perms: 'private',
-        channels: [
-          { key: 'priv_voice', name: STYLE('🔒', 'PRIV'), type: T.GuildVoice, match: ['priv', 'private', 'owner'], perms: 'private' },
-          { key: 'priv_text', name: STYLE('🔒', 'PRIV-CHAT'), type: T.GuildText, match: ['privchat', 'priv', 'private', 'owner'], perms: 'private' },
-        ],
-      },
-      {
-        key: 'sensitive',
-        name: STYLE('🔐', 'OSJETLJIVO'),
-        match: ['osjetljivo', 'sensitive', 'osjetljivi'],
-        perms: 'sensitive',
-        sync: true, // every channel already inside it is synced to the category
-        channels: [],
       },
     ],
   };
@@ -135,56 +102,56 @@ function buildPlan(siteName) {
 const FULL = [P.ViewChannel, P.SendMessages, P.ReadMessageHistory, P.EmbedLinks, P.AttachFiles, P.Connect, P.Speak];
 const READ = [P.ViewChannel, P.ReadMessageHistory];
 const NO_POST = [P.SendMessages, P.AddReactions, P.CreatePublicThreads, P.CreatePrivateThreads];
+const NO_JOIN = [P.Connect, P.Speak];
 
 /**
- * Permission overwrites for one permission set. Discord only lets a bot set overwrites for
- * permissions it holds itself, so `held` filters every list (Administrator holds everything).
+ * Permission overwrites for one set. Discord only lets a bot set overwrites for permissions it
+ * holds itself, so every list goes through `held`. Overwrite types are explicit so nothing
+ * depends on the user or role being cached. Administrators ignore overwrites and see everything.
  *
- *  verify    everyone can see the panel but not type; VERIFIED members no longer see it;
- *            staff still can (a role allow beats a role deny in Discord's precedence).
- *  verified  hidden from everyone except VERIFIED (+ staff, manager, bot).
- *  private   owner + CO-OWNER only.
- *  sensitive the sensitive role only.
- *  readonly  everyone sees it, nobody but the bot can post.
+ *  verify    everyone reads but cannot post; the verified role no longer sees it; staff still does
+ *  members   hidden from everyone except the verified role and staff
+ *  private   the server owner and the priv role only
+ *  reminder  visible to everyone, nobody can join
  */
 function permsFor(kind, ids, held) {
   const H = (flags) => held(flags);
-  const bot = { id: ids.bot, allow: H(FULL) };
+  const role = (id, allow, deny) => ({ id, type: OverwriteType.Role, allow, deny });
+  const member = (id, allow, deny) => ({ id, type: OverwriteType.Member, allow, deny });
   const rows = [];
   switch (kind) {
     case 'verify':
-      rows.push({ id: ids.everyone, allow: H(READ), deny: H(NO_POST) });
-      if (ids.verified) rows.push({ id: ids.verified, deny: H([P.ViewChannel]) });
-      if (ids.staff) rows.push({ id: ids.staff, allow: H([P.ViewChannel, P.SendMessages, P.ReadMessageHistory]) });
-      if (ids.manager) rows.push({ id: ids.manager, allow: H([P.ViewChannel, P.SendMessages, P.ReadMessageHistory]) });
+      rows.push(role(ids.everyone, H(READ), H(NO_POST)));
+      if (ids.verified) rows.push(role(ids.verified, undefined, H([P.ViewChannel])));
+      if (ids.support) rows.push(role(ids.support, H([P.ViewChannel, P.SendMessages, P.ReadMessageHistory])));
+      if (ids.manager) rows.push(member(ids.manager, H([P.ViewChannel, P.SendMessages, P.ReadMessageHistory])));
       break;
-    case 'verified':
-      rows.push({ id: ids.everyone, deny: H([P.ViewChannel]) });
-      if (ids.verified) rows.push({ id: ids.verified, allow: H(FULL) });
-      if (ids.staff) rows.push({ id: ids.staff, allow: H(FULL) });
-      if (ids.manager) rows.push({ id: ids.manager, allow: H(FULL) });
+    case 'members':
+      rows.push(role(ids.everyone, undefined, H([P.ViewChannel])));
+      if (ids.verified) rows.push(role(ids.verified, H(FULL)));
+      if (ids.support) rows.push(role(ids.support, H(FULL)));
+      if (ids.manager) rows.push(member(ids.manager, H(FULL)));
       break;
     case 'private':
-      rows.push({ id: ids.everyone, deny: H([P.ViewChannel]) });
-      if (ids.owner) rows.push({ id: ids.owner, allow: H(FULL) });
-      if (ids.coowner) rows.push({ id: ids.coowner, allow: H(FULL) });
+      rows.push(role(ids.everyone, undefined, H([P.ViewChannel, P.Connect])));
+      if (ids.priv) rows.push(role(ids.priv, H(FULL)));
+      if (ids.owner) rows.push(member(ids.owner, H(FULL)));
       break;
-    case 'sensitive':
-      rows.push({ id: ids.everyone, deny: H([P.ViewChannel]) });
-      if (ids.sensitive) rows.push({ id: ids.sensitive, allow: H(FULL) });
-      break;
-    case 'readonly':
-      rows.push({ id: ids.everyone, allow: H(READ), deny: H(NO_POST) });
+    case 'reminder':
+      rows.push(role(ids.everyone, H(READ), H(NO_JOIN)));
       break;
     default:
       throw new Error(`unknown permission set: ${kind}`);
   }
-  rows.push(bot);
-  // never emit an overwrite that changes nothing (Discord rejects empty ones on some routes)
+  rows.push(member(ids.bot, H(FULL)));
   return rows.filter((r) => (r.allow && r.allow.length) || (r.deny && r.deny.length));
 }
 
-const bits = (list) => PermissionsBitField.resolve(list || []);
+const bits = (list) => {
+  let v = 0n;
+  for (const f of list || []) v |= BigInt(f);
+  return v;
+};
 const bitfieldOf = (v) => (v && typeof v === 'object' && v.bitfield !== undefined ? BigInt(v.bitfield) : bits(v));
 
 /** True when the channel's current overwrites are not exactly the wanted list. */
@@ -207,44 +174,100 @@ function hasOpenButton(message) {
   return rows.some((row) => ((row && row.components) || []).some((c) => idOf(c) === BUTTONS.open));
 }
 
+const isThread = (c) => !!(c && typeof c.isThread === 'function' && c.isThread());
+
 /**
- * Find an existing channel for a spec. Order: the id remembered from a previous run, then a name
- * match inside the wanted parent, then among uncategorised channels, then (only if the spec says
- * `anywhere`) anywhere on the server. Never returns a channel already claimed by another spec.
+ * Split the server's channels into what stays and what goes.
+ *  keepRoots     category ids that stay untouched together with everything inside them
+ *  undeletable   ids Discord will not let a bot delete (Community rules and updates channels)
+ * Removal order: children first, categories last.
  */
-function findChannel(channels, spec, { kinds, parentId, claimed, storedId }) {
-  const okType = (c) => c && kinds.includes(c.type) && !claimed.has(c.id);
-  if (storedId) {
-    const c = channels.find((x) => x.id === storedId);
-    if (okType(c)) return c;
-  }
-  const tokens = [normalizeName(spec.name), ...(spec.match || [])].map(normalizeName).filter(Boolean);
-  const pools = [];
-  if (parentId === undefined) pools.push(channels.filter(okType));
-  else {
-    if (parentId) pools.push(channels.filter((c) => okType(c) && c.parentId === parentId));
-    pools.push(channels.filter((c) => okType(c) && !c.parentId));
-    if (spec.anywhere) pools.push(channels.filter(okType));
-  }
-  for (const pool of pools) {
-    for (const tok of tokens) {
-      const hit = pool.find((c) => normalizeName(c.name) === tok);
-      if (hit) return hit;
-    }
-  }
-  return null;
+function classifyChannels(channels, { keepRoots, undeletable }) {
+  const roots = new Set([...keepRoots].filter(Boolean));
+  const all = channels.filter((c) => !isThread(c));
+  const kept = all.filter((c) => roots.has(c.id) || roots.has(c.parentId));
+  const keptIds = new Set(kept.map((c) => c.id));
+  const rest = all.filter((c) => !keptIds.has(c.id));
+  const blocked = rest.filter((c) => undeletable.has(c.id));
+  const remove = rest
+    .filter((c) => !undeletable.has(c.id))
+    .sort((a, b) => {
+      const ac = a.type === T.GuildCategory ? 1 : 0;
+      const bc = b.type === T.GuildCategory ? 1 : 0;
+      return ac - bc || (a.rawPosition || 0) - (b.rawPosition || 0);
+    });
+  return { kept, remove, blocked };
 }
 
-function defaultBucket() {
-  return { roles: {}, channels: {}, updatedAt: null };
+/**
+ * Decide what happens to every role.
+ *  protectedIds   Map id -> reason for roles that must stay exactly as they are
+ *  autoRoleNames  bare names of the auto role (the bot recreates it anyway)
+ * Roles are handled highest first. Template roles found by name are reused (renamed in place, so
+ * members keep them); the rest are deleted unless they carry Administrator.
+ */
+function classifyRoles(roles, { botTop, everyoneId, protectedIds, autoRoleNames = [], needVerified = false, deleteRoles = true }) {
+  const out = { kept: [], adopt: [], create: [], remove: [] };
+  const pool = [];
+  for (const r of [...roles].sort((a, b) => b.position - a.position)) {
+    if (r.id === everyoneId) continue;
+    if (r.managed) out.kept.push({ id: r.id, name: r.name, reason: 'managed by an integration' });
+    else if (r.position >= botTop) out.kept.push({ id: r.id, name: r.name, reason: 'above my role' });
+    else if (isPlusRole(r)) out.kept.push({ id: r.id, name: r.name, reason: 'the + role' });
+    else if (protectedIds.has(r.id)) out.kept.push({ id: r.id, name: r.name, reason: protectedIds.get(r.id) });
+    else if (autoRoleNames.includes(normalizeName(r.name))) out.kept.push({ id: r.id, name: r.name, reason: 'auto role' });
+    else pool.push(r);
+  }
+
+  const wanted = ['coowner', 'support', 'vip', 'friend', 'blank'];
+  for (const key of wanted) {
+    const spec = ROLE_SPECS[key];
+    const hit = pool.find((r) => (spec.blank ? isBlankName(r.name) : spec.match.includes(normalizeName(r.name))));
+    if (hit) {
+      out.adopt.push({ key, id: hit.id, name: hit.name, to: spec.name });
+      pool.splice(pool.indexOf(hit), 1);
+    } else {
+      out.create.push({ key, name: spec.name });
+    }
+  }
+  if (needVerified) out.create.push({ key: 'verified', name: ROLE_SPECS.verified.name });
+
+  for (const r of pool) {
+    if (r.permissions && typeof r.permissions.has === 'function' && r.permissions.has(P.Administrator)) {
+      out.kept.push({ id: r.id, name: r.name, reason: 'has Administrator' });
+    } else if (deleteRoles) out.remove.push({ id: r.id, name: r.name });
+    else out.kept.push({ id: r.id, name: r.name, reason: 'left alone' });
+  }
+  return out;
 }
+
+/**
+ * New positions that stack `stack` (lowest first) directly above `anchorId`, or at the top of the
+ * band below the bot when there is no anchor. Only roles below the bot are ever moved, and only
+ * those whose position actually changes are returned.
+ */
+function planRoleOrder(roles, { botTop, everyoneId, anchorId, stack }) {
+  const below = roles.filter((r) => r.id !== everyoneId && r.position < botTop).sort((a, b) => a.position - b.position);
+  const present = stack.filter((id) => below.some((r) => r.id === id));
+  const ids = below.map((r) => r.id).filter((id) => !present.includes(id));
+  const at = anchorId && ids.includes(anchorId) ? ids.indexOf(anchorId) + 1 : ids.length;
+  ids.splice(at, 0, ...present);
+  const byId = new Map(below.map((r) => [r.id, r]));
+  return ids.map((id, i) => ({ role: id, position: i + 1 })).filter((e) => byId.get(e.role).position !== e.position);
+}
+
+const listOf = (v) =>
+  String(v || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
 
 // ---------- service ----------
 
 class SetupService {
   /**
    * @param {import('../storage').Storage} storage
-   * @param {object} config app config (uses config.setup, config.manager)
+   * @param {object} config app config (uses config.setup, config.web, config.autoRole, config.manager)
    * @param {import('./tickets').TicketService} tickets
    * @param {import('./roleMemory').RoleMemoryService} roleMemory
    */
@@ -254,14 +277,16 @@ class SetupService {
     this.tickets = tickets;
     this.roleMemory = roleMemory;
     this.running = new Set();
+    this.pending = new Map();
   }
 
   _bucket(guildId) {
     const all = this.storage.data.setup;
-    if (!hasOwn(all, guildId)) setOwn(all, guildId, defaultBucket());
+    if (!hasOwn(all, guildId)) setOwn(all, guildId, { roles: {}, channels: {}, keep: [], updatedAt: null });
     const b = all[guildId];
     if (!b.roles || typeof b.roles !== 'object') b.roles = {};
     if (!b.channels || typeof b.channels !== 'object') b.channels = {};
+    if (!Array.isArray(b.keep)) b.keep = [];
     return b;
   }
 
@@ -269,7 +294,15 @@ class SetupService {
     return this.running.has(guildId);
   }
 
-  /** The VERIFIED role of a guild: what /setup adopted or created, else the .env default if it exists there. */
+  _held(guild) {
+    const me = guild.members.me;
+    const perms = me && me.permissions && typeof me.permissions.has === 'function' ? me.permissions : null;
+    return (flags) => (perms ? flags.filter((f) => perms.has(f)) : flags);
+  }
+
+  // ---- who counts as verified ----
+
+  /** The verified role of a guild: what /setup stored, else the configured id if it exists there. */
   getVerifiedRoleId(guild) {
     if (!guild || !guild.roles || !guild.roles.cache) return null;
     const all = this.storage.data.setup;
@@ -289,8 +322,8 @@ class SetupService {
 
   /**
    * May this member use a "verified members only" command?
-   * Passes: the manager, anyone with bypass, the server owner, admins (Administrator / Manage Server)
-   * and everyone holding the VERIFIED role. A server with no known VERIFIED role stays open.
+   * Passes: the manager, anyone with bypass, the server owner, admins (Administrator or Manage
+   * Server) and holders of the verified role. A server with no known verified role stays open.
    * Returns { ok: true } or { ok: false, roleId, channelId }.
    */
   verifiedGate(guild, member, user, { isManager = () => false, isBypass = () => false } = {}) {
@@ -306,223 +339,332 @@ class SetupService {
     return { ok: false, roleId, channelId: this.getVerifyChannelId(guild) };
   }
 
-  _held(guild) {
-    const me = guild.members.me;
-    const perms = me && me.permissions && typeof me.permissions.has === 'function' ? me.permissions : null;
-    return (flags) => (perms ? flags.filter((f) => perms.has(f)) : flags);
+  // ---- preview ----
+
+  _keepRoots(guild, opts) {
+    const cfg = this.config.setup;
+    const names = new Set((cfg.keepCategories || []).map(normalizeName));
+    const stored = new Set(this._bucket(guild.id).keep);
+    const cats = [...guild.channels.cache.values()].filter((c) => c.type === T.GuildCategory);
+    const roots = new Map();
+    for (const c of cats) {
+      if (names.has(normalizeName(c.name)) || stored.has(c.id)) roots.set(c.id, c);
+    }
+    if (opts.keep && opts.keep.id && guild.channels.cache.has(opts.keep.id)) roots.set(opts.keep.id, guild.channels.cache.get(opts.keep.id));
+    return [...roots.values()];
   }
 
-  _channels(guild) {
-    return [...guild.channels.cache.values()];
+  _ticketCategory(guild) {
+    const b = this.tickets._guild(guild.id);
+    const wanted = normalizeName(this.config.tickets.categoryName);
+    const cats = [...guild.channels.cache.values()].filter((c) => c.type === T.GuildCategory);
+    return (b.categoryId && cats.find((c) => c.id === b.categoryId)) || cats.find((c) => normalizeName(c.name) === wanted) || null;
+  }
+
+  _verifiedRole(guild, opts) {
+    const cache = guild.roles.cache;
+    const usable = (r) => r && r.id !== guild.id && !r.managed;
+    if (usable(opts.verified)) return { role: opts.verified, source: 'chosen in the command' };
+    const cfgId = this.config.setup.verifiedRoleId;
+    if (cfgId && usable(cache.get(cfgId))) return { role: cache.get(cfgId), source: 'the configured role' };
+    const plus = [...cache.values()].find((r) => usable(r) && isPlusRole(r));
+    if (plus) return { role: plus, source: 'the + role' };
+    const stored = this._bucket(guild.id).roles.verified;
+    if (stored && usable(cache.get(stored))) return { role: cache.get(stored), source: 'the role from the last setup' };
+    return { role: null, source: 'created new' };
   }
 
   /**
-   * Build (or repair) the whole server. Never deletes a channel or a role.
-   * opts: { verified, staff, coowner, sensitive } role objects chosen by the admin, styleRoles.
-   * Returns { ok, reason?, report } where report = { created, updated, ok, warnings, errors }.
+   * Work out exactly what a rebuild would do, without touching anything.
+   * Returns { ok: false, problems } or { ok: true, plan }.
    */
-  async run(guild, opts = {}) {
-    const report = { created: [], updated: [], ok: [], warnings: [], errors: [] };
+  async preview(guild, opts = {}) {
+    if (guild.channels && typeof guild.channels.fetch === 'function') await guild.channels.fetch().catch(() => {});
+    if (guild.roles && typeof guild.roles.fetch === 'function') await guild.roles.fetch().catch(() => {});
+
+    const problems = [];
     const me = guild.members.me;
     const perms = me && me.permissions && typeof me.permissions.has === 'function' ? me.permissions : null;
-    const isAdmin = !!(perms && perms.has(P.Administrator));
-    if (!perms || (!isAdmin && (!perms.has(P.ManageChannels) || !perms.has(P.ManageRoles)))) {
-      return { ok: false, reason: 'missing_permissions', report };
+    const admin = !!(perms && perms.has(P.Administrator));
+    if (!perms || (!admin && (!perms.has(P.ManageChannels) || !perms.has(P.ManageRoles)))) {
+      problems.push('I need the Administrator permission, or Manage Channels and Manage Roles, to rebuild the server.');
     }
-    if (this.running.has(guild.id)) return { ok: false, reason: 'in_progress', report };
 
+    const keepCats = this._keepRoots(guild, opts);
+    if (!keepCats.length) {
+      const names = (this.config.setup.keepCategories || ['osjetljivo']).join(', ');
+      problems.push(`I cannot find the ${names} category, so I will not delete anything. Pick it with the keep option.`);
+    }
+    const ticketCat = this._ticketCategory(guild);
+
+    if (problems.length) return { ok: false, problems };
+
+    const undeletable = new Set([guild.rulesChannelId, guild.publicUpdatesChannelId].filter(Boolean));
+    const keepRoots = new Set([...keepCats.map((c) => c.id), ...(ticketCat ? [ticketCat.id] : [])]);
+    const channels = classifyChannels([...guild.channels.cache.values()], { keepRoots, undeletable });
+
+    const verified = this._verifiedRole(guild, opts);
+    const protectedIds = new Map();
+    const protect = (id, why) => id && !protectedIds.has(id) && protectedIds.set(id, why);
+    protect(verified.role && verified.role.id, 'verified role');
+    protect(this.config.setup.sensitiveRoleId, 'gives access to the kept category');
+    protect(opts.priv && opts.priv.id, 'chosen for the priv channels');
+    for (const id of (this.config.web && this.config.web.roleIds) || []) protect(id, 'used by the website');
+    for (const id of this.config.setup.protectedRoleIds || []) protect(id, 'protected in the settings');
+    protect(this.roleMemory.getGuildAutoRole(guild.id), 'auto role');
+    if (this.config.autoRole && this.config.autoRole.id) protect(this.config.autoRole.id, 'auto role');
+
+    const autoNames = [normalizeName(this.config.autoRole && this.config.autoRole.name)].filter(Boolean);
+    const roles = classifyRoles([...guild.roles.cache.values()], {
+      botTop: me.roles.highest.position,
+      everyoneId: guild.id,
+      protectedIds,
+      autoRoleNames: autoNames,
+      needVerified: !verified.role,
+      deleteRoles: opts.deleteRoles !== false,
+    });
+
+    const warnings = [];
+    if (verified.role && verified.role.position >= me.roles.highest.position) {
+      warnings.push(`My role is not above ${verified.role.name}, so I cannot hand it out. Move my role higher.`);
+    }
+    if (channels.blocked.length) {
+      warnings.push(`Discord will not let me delete ${channels.blocked.map((c) => c.name).join(', ')} (required by Community).`);
+    }
+
+    return {
+      ok: true,
+      plan: {
+        guildId: guild.id,
+        createdAt: Date.now(),
+        opts: { verifiedId: verified.role ? verified.role.id : null, privId: opts.priv ? opts.priv.id : null, deleteRoles: opts.deleteRoles !== false, keepId: opts.keep ? opts.keep.id : null },
+        verified: { name: verified.role ? verified.role.name : ROLE_SPECS.verified.name, source: verified.source, id: verified.role ? verified.role.id : null },
+        keepCategories: keepCats.map((c) => ({ id: c.id, name: c.name })),
+        ticketCategory: ticketCat ? { id: ticketCat.id, name: ticketCat.name } : null,
+        keepRoots: [...keepRoots],
+        keptChannels: channels.kept.filter((c) => c.type !== T.GuildCategory).map((c) => ({ id: c.id, name: c.name })),
+        remove: channels.remove.map((c) => ({ id: c.id, name: c.name, category: c.type === T.GuildCategory })),
+        blocked: channels.blocked.map((c) => ({ id: c.id, name: c.name })),
+        roles,
+        create: buildLayout(this.config.setup.siteName),
+        warnings,
+      },
+    };
+  }
+
+  // ---- pending confirmations ----
+
+  createPending(plan, userId) {
+    const now = Date.now();
+    for (const [k, v] of this.pending) if (v.expires < now) this.pending.delete(k);
+    const token = crypto.randomBytes(8).toString('hex');
+    this.pending.set(token, { plan, userId, guildId: plan.guildId, expires: now + this.config.setup.confirmTtlMs });
+    return token;
+  }
+
+  /** Single use: the entry is removed whether or not it matches. */
+  takePending(token, { guildId, userId }) {
+    const entry = this.pending.get(token);
+    this.pending.delete(token);
+    if (!entry || entry.expires < Date.now() || entry.guildId !== guildId || entry.userId !== userId) return null;
+    return entry.plan;
+  }
+
+  dropPending(token) {
+    this.pending.delete(token);
+  }
+
+  // ---- execute ----
+
+  /**
+   * Rebuild the server from a previewed plan. Order matters:
+   *   1. roles, 2. build every new channel, 3. only then delete what the preview listed,
+   *   4. ordering and the panel.
+   * If the build fails, every channel created so far is removed again and nothing old is deleted.
+   * Only channels and roles named in the preview are ever deleted, and never anything inside a
+   * kept category.
+   */
+  async execute(guild, plan, { onProgress = async () => {} } = {}) {
+    if (this.running.has(guild.id)) return { ok: false, reason: 'in_progress' };
     this.running.add(guild.id);
+    const report = { created: [], updated: [], deleted: [], kept: [], failed: [], warnings: [...plan.warnings] };
+    const created = [];
     try {
-      const b = this._bucket(guild.id);
-      const roles = await this._ensureRoles(guild, b, opts, report);
-      if (roles.staff) this.tickets.setStaffRole(guild.id, roles.staff.id);
+      if (guild.channels && typeof guild.channels.fetch === 'function') await guild.channels.fetch().catch(() => {});
+      if (guild.roles && typeof guild.roles.fetch === 'function') await guild.roles.fetch().catch(() => {});
+      const me = guild.members.me;
+      const cache = guild.channels.cache;
+      const keepRoots = new Set(plan.keepRoots);
+      for (const c of plan.keepCategories) {
+        if (!cache.has(c.id)) return { ok: false, reason: 'keep_missing', name: c.name };
+      }
+
+      await onProgress('Roles');
+      const R = await this._roles(guild, plan, report);
 
       const managerId = this.config.manager.id;
       const ids = {
         everyone: guild.id,
         bot: me.id,
         owner: guild.ownerId,
-        manager: managerId && guild.members.cache.has(managerId) && managerId !== guild.ownerId ? managerId : null,
-        verified: roles.verified ? roles.verified.id : null,
-        staff: roles.staff ? roles.staff.id : null,
-        coowner: roles.coowner ? roles.coowner.id : null,
-        sensitive: roles.sensitive ? roles.sensitive.id : null,
+        manager: managerId && managerId !== guild.ownerId && guild.members.cache.has(managerId) ? managerId : null,
+        verified: R.verified ? R.verified.id : null,
+        support: R.support ? R.support.id : null,
+        priv: plan.opts.privId || (R.coowner ? R.coowner.id : null),
       };
+      if (R.support) this.tickets.setStaffRole(guild.id, R.support.id);
 
-      const plan = buildPlan(this.config.setup.siteName);
-      const claimed = new Set();
-      const order = { top: [], categories: [], children: [] };
-
-      for (const spec of plan.top) {
-        const ch = await this._ensureChannel(guild, b, spec, { parent: null, ids, claimed, report });
-        if (ch) order.top.push(ch);
+      await onProgress('Building');
+      const built = { channels: {}, top: [], categories: [] };
+      try {
+        await this._build(guild, plan, ids, built, created, report);
+      } catch (err) {
+        for (const ch of created.reverse()) await ch.delete('35xw /setup rollback').catch(() => {});
+        return { ok: false, reason: 'build_failed', message: err.message, report };
       }
 
-      for (const cspec of plan.categories) {
-        let cat = null;
-        if (cspec.managed) {
-          cat = await this._ensureTickets(guild, report);
-        } else {
-          cat = await this._ensureChannel(guild, b, { ...cspec, type: ChannelType.GuildCategory }, { parent: undefined, ids, claimed, report });
-          if (cat) {
-            const kids = [];
-            for (const chspec of cspec.channels) {
-              const ch = await this._ensureChannel(guild, b, chspec, { parent: cat.id, ids, claimed, report });
-              if (ch) kids.push(ch);
-            }
-            order.children.push(kids);
-            if (cspec.sync) await this._syncChildren(guild, cat, report);
+      await this._panel(guild, built, report);
+
+      await onProgress('Removing old channels');
+      for (const item of plan.remove) {
+        const ch = cache.get(item.id);
+        if (!ch) continue;
+        if (keepRoots.has(ch.id) || keepRoots.has(ch.parentId)) continue; // moved into a kept category since the preview
+        try {
+          await ch.delete('35xw /setup server');
+          report.deleted.push(item.name);
+        } catch (err) {
+          report.failed.push(`${item.name}: ${err.message}`);
+        }
+      }
+
+      if (plan.opts.deleteRoles) {
+        await onProgress('Removing old roles');
+        for (const item of plan.roles.remove) {
+          const role = guild.roles.cache.get(item.id);
+          if (!role || role.managed || role.position >= me.roles.highest.position || isPlusRole(role)) continue;
+          try {
+            await role.delete('35xw /setup server');
+            report.deleted.push(`role ${item.name}`);
+          } catch (err) {
+            report.failed.push(`role ${item.name}: ${err.message}`);
           }
         }
-        if (cat) order.categories.push(cat);
       }
 
-      await this._applyPositions(guild, order, report);
-      await this._ensurePanel(guild, b, report);
-      this._notes(guild, roles, report);
+      await onProgress('Ordering');
+      await this._order(guild, plan, built, R, report);
 
+      const b = this._bucket(guild.id);
+      b.roles = {};
+      for (const [k, r] of Object.entries(R)) if (r) setOwn(b.roles, k, r.id);
+      b.channels = {};
+      for (const [k, ch] of Object.entries(built.channels)) if (ch) setOwn(b.channels, k, ch.id);
+      b.keep = plan.keepCategories.map((c) => c.id);
       b.updatedAt = Date.now();
       this.storage.save();
+
+      for (const c of plan.keepCategories) report.kept.push(c.name);
+      for (const r of plan.roles.kept) report.kept.push(`role ${r.name}`);
       return { ok: true, report };
     } finally {
       this.running.delete(guild.id);
     }
   }
 
-  // ---- roles ----
-
-  async _ensureRoles(guild, b, opts, report) {
-    const cfg = this.config.setup;
-    const styleRoles = opts.styleRoles !== false;
-    const out = {};
-    const jobs = [
-      ['verified', { optionRole: opts.verified, configId: cfg.verifiedRoleId }],
-      ['staff', { optionRole: opts.staff, fallbackId: this.tickets.getStaffRole(guild.id) }],
-      ['coowner', { optionRole: opts.coowner }],
-      ['friend', {}],
-      ['vip', {}],
-      ['sensitive', { optionRole: opts.sensitive, configId: cfg.sensitiveRoleId }],
-      ['blank', {}],
-    ];
-    for (const [key, how] of jobs) {
-      try {
-        out[key] = await this._ensureRole(guild, b, key, ROLE_SPECS[key], { ...how, styleRoles, report });
-      } catch (err) {
-        out[key] = null;
-        report.errors.push(`rola ${ROLE_SPECS[key].blank ? '(prazna)' : `\`${ROLE_SPECS[key].name}\``}: ${err.message}`);
-      }
-    }
-    return out;
-  }
-
-  async _ensureRole(guild, b, key, spec, { optionRole, configId, fallbackId, styleRoles, report }) {
+  async _roles(guild, plan, report) {
     const cache = guild.roles.cache;
-    const all = [...cache.values()];
-    const usable = (r) => r && r.id !== guild.id && !r.managed;
-    let role = usable(optionRole) ? optionRole : null;
-    for (const id of [configId, fallbackId, b.roles[key]]) {
-      if (role) break;
-      if (id && cache.has(id) && usable(cache.get(id))) role = cache.get(id);
-    }
-    if (!role) {
-      if (spec.blank) role = all.find((r) => usable(r) && isBlankName(r.name)) || null;
-      else {
-        for (const tok of [normalizeName(spec.name), ...spec.match]) {
-          role = all.find((r) => usable(r) && normalizeName(r.name) === tok) || null;
-          if (role) break;
-        }
+    const R = {};
+    const verifiedId = plan.opts.verifiedId;
+    if (verifiedId && cache.has(verifiedId)) R.verified = cache.get(verifiedId);
+    const safe = async (label, fn) => {
+      try {
+        return await fn();
+      } catch (err) {
+        report.failed.push(`role ${label}: ${err.message}`);
+        return null;
       }
-    }
-
-    const label = spec.blank ? 'prazna rola' : `\`${spec.name}\``;
-    if (!role) {
-      role = await guild.roles.create({
-        name: spec.name,
-        color: spec.color || undefined,
-        hoist: false,
-        mentionable: false,
-        permissions: [],
-        reason: '35xw /setup',
-      });
-      report.created.push(`🎭 ${label}`);
-    } else {
-      const patch = {};
-      if (styleRoles && !spec.noRename && !spec.blank && role.name !== spec.name) patch.name = spec.name;
-      if (spec.blank && role.hoist) patch.hoist = false; // must not be displayed separately from members
-      if (Object.keys(patch).length) {
-        const old = role.name;
-        await role.edit({ ...patch, reason: '35xw /setup' });
-        report.updated.push(patch.name ? `🎭 \`${old}\` → \`${spec.name}\`` : `🎭 ${label} više nije odvojena`);
-      } else {
-        report.ok.push(`🎭 ${spec.blank ? 'prazna rola' : `\`${role.name}\``}`);
-      }
-    }
-    setOwn(b.roles, key, role.id);
-    return role;
-  }
-
-  // ---- channels ----
-
-  async _ensureChannel(guild, b, spec, { parent, ids, claimed, report }) {
-    const isCategory = spec.type === ChannelType.GuildCategory;
-    const kinds = isCategory ? [ChannelType.GuildCategory] : spec.kinds || (VOICE_KINDS.includes(spec.type) ? VOICE_KINDS : TEXT_KINDS);
-    const icon = isCategory ? '📁' : VOICE_KINDS.includes(spec.type) ? '🔊' : '#';
-    const wanted = permsFor(spec.perms, ids, this._held(guild));
-    try {
-      let ch = findChannel(this._channels(guild), spec, {
-        kinds,
-        parentId: isCategory ? undefined : parent,
-        claimed,
-        storedId: b.channels[spec.key],
-      });
-      if (!ch) {
-        ch = await guild.channels.create({
-          name: spec.name,
-          type: spec.type,
-          parent: parent || undefined,
-          permissionOverwrites: wanted,
-          reason: '35xw /setup',
+    };
+    for (const a of plan.roles.adopt) {
+      const role = cache.get(a.id);
+      if (!role) continue;
+      const spec = ROLE_SPECS[a.key];
+      if (role.name !== spec.name) {
+        await safe(a.name, async () => {
+          await role.edit({ name: spec.name, reason: '35xw /setup server' });
+          report.updated.push(`role ${a.name} renamed to ${spec.name}`);
         });
-        report.created.push(`${icon} \`${spec.name}\``);
-      } else {
-        const patch = {};
-        const old = ch.name;
-        if (ch.name !== spec.name) patch.name = spec.name;
-        if (!isCategory && (ch.parentId || null) !== (parent || null)) {
-          patch.parent = parent || null;
-          patch.lockPermissions = false;
-        }
-        if (overwritesDiffer(ch, wanted)) patch.permissionOverwrites = wanted;
-        if (Object.keys(patch).length) {
-          await ch.edit({ ...patch, reason: '35xw /setup' });
-          const what = [];
-          if (patch.name) what.push(`preimenovano iz \`${old}\``);
-          if (patch.parent !== undefined) what.push('premješteno');
-          if (patch.permissionOverwrites) what.push('dozvole');
-          report.updated.push(`${icon} \`${spec.name}\` (${what.join(', ')})`);
-        } else {
-          report.ok.push(`${icon} \`${spec.name}\``);
-        }
       }
-      claimed.add(ch.id);
-      setOwn(b.channels, spec.key, ch.id);
-      return ch;
-    } catch (err) {
-      report.errors.push(`${icon} \`${spec.name}\`: ${err.message}`);
-      return null;
+      if (spec.blank && role.hoist) await safe(a.name, () => role.edit({ hoist: false, reason: '35xw /setup server' }));
+      R[a.key] = role;
+    }
+    for (const c of plan.roles.create) {
+      const spec = ROLE_SPECS[c.key];
+      const role = await safe(spec.name, () =>
+        guild.roles.create({ name: spec.name, color: spec.color || undefined, hoist: false, mentionable: false, permissions: [], reason: '35xw /setup server' }),
+      );
+      if (role) {
+        R[c.key] = role;
+        report.created.push(`role ${spec.name}`);
+      }
+    }
+    if (plan.opts.privId && cache.has(plan.opts.privId)) R.priv = cache.get(plan.opts.privId);
+    else if (R.coowner) R.priv = R.coowner;
+    return R;
+  }
+
+  async _create(guild, spec, parentId, ids, held, created, report) {
+    const isCategory = spec.type === T.GuildCategory;
+    const payload = {
+      name: spec.name,
+      type: spec.type,
+      permissionOverwrites: permsFor(spec.perms, ids, held),
+      reason: '35xw /setup server',
+    };
+    if (parentId) payload.parent = parentId;
+    if (spec.topic) payload.topic = spec.topic;
+    const ch = await guild.channels.create(payload);
+    created.push(ch);
+    report.created.push(`${isCategory ? 'category' : spec.type === T.GuildVoice ? 'voice' : 'channel'} ${spec.name}`);
+    return ch;
+  }
+
+  async _build(guild, plan, ids, built, created, report) {
+    const held = this._held(guild);
+    const layout = plan.create;
+    for (const spec of layout.top) {
+      const ch = await this._create(guild, spec, null, ids, held, created, report);
+      built.channels[spec.key] = ch;
+      built.top.push(ch);
+    }
+    for (const cspec of layout.categories) {
+      if (cspec.managed) {
+        // The ticket service may create the category and #transcripts; track them so a failed build removes them too.
+        const known = new Set(guild.channels.cache.keys());
+        const cat = await this._ensureTickets(guild, report);
+        for (const ch of guild.channels.cache.values()) if (!known.has(ch.id)) created.push(ch);
+        if (cat) built.categories.push(cat);
+        continue;
+      }
+      const cat = await this._create(guild, { ...cspec, type: T.GuildCategory }, null, ids, held, created, report);
+      built.categories.push(cat);
+      built.channels[cspec.key] = cat;
+      for (const child of cspec.channels) {
+        const ch = await this._create(guild, child, cat.id, ids, held, created, report);
+        built.channels[child.key] = ch;
+        if (child.panel) built.panelChannel = ch;
+      }
     }
   }
 
-  /** The tickets category + transcripts channel are kept private exactly as the ticket service wants them. */
+  /** The tickets category and #transcripts are kept, and re-permissioned for the new support role. */
   async _ensureTickets(guild, report) {
     try {
       const cat = await this.tickets.ensureCategory(guild);
       const base = this.tickets._baseOverwrites(guild);
       if (overwritesDiffer(cat, base)) {
-        await cat.edit({ permissionOverwrites: base, reason: '35xw /setup' });
-        report.updated.push(`📁 \`${cat.name}\` (dozvole)`);
-      } else {
-        report.ok.push(`📁 \`${cat.name}\``);
+        await cat.edit({ permissionOverwrites: base, reason: '35xw /setup server' });
+        report.updated.push(`category ${cat.name} permissions`);
       }
       const tr = await this.tickets.ensureTranscriptChannel(guild);
       const patch = {};
@@ -532,91 +674,57 @@ class SetupService {
       }
       if (overwritesDiffer(tr, base)) patch.permissionOverwrites = base;
       if (Object.keys(patch).length) {
-        await tr.edit({ ...patch, reason: '35xw /setup' });
-        report.updated.push(`# \`${tr.name}\` (samo staff + admini)`);
-      } else {
-        report.ok.push(`# \`${tr.name}\``);
+        await tr.edit({ ...patch, reason: '35xw /setup server' });
+        report.updated.push(`channel ${tr.name} permissions`);
       }
       return cat;
     } catch (err) {
-      report.errors.push(`📁 tickets: ${err.message}`);
+      report.failed.push(`tickets category: ${err.message}`);
       return null;
     }
   }
 
-  /** Sync every channel inside a category to the category's permissions. */
-  async _syncChildren(guild, cat, report) {
-    let synced = 0;
-    let failed = 0;
-    for (const ch of this._channels(guild)) {
-      if (ch.parentId !== cat.id || typeof ch.lockPermissions !== 'function') continue;
-      if (ch.permissionsLocked === true) continue;
+  /** Post the verification panel into the new verify channel. */
+  async _panel(guild, built, report) {
+    const ch = built.panelChannel;
+    if (!ch || typeof ch.send !== 'function') return;
+    try {
+      await ch.send({ embeds: [panelEmbed()], components: [panelRow()] });
+      report.created.push('verification panel');
+    } catch (err) {
+      report.failed.push(`verification panel: ${err.message}`);
+    }
+  }
+
+  /** Channel order (new categories first, kept ones last) and role order (template stack above the verified role). */
+  async _order(guild, plan, built, R, report) {
+    if (guild.channels && typeof guild.channels.setPositions === 'function') {
+      const keepIds = new Set(plan.keepCategories.map((c) => c.id));
+      const layoutIds = new Set([...built.top, ...built.categories].map((c) => c.id));
+      const leftovers = [...guild.channels.cache.values()].filter((c) => !c.parentId && !layoutIds.has(c.id) && !keepIds.has(c.id) && !isThread(c));
+      const looseChannels = leftovers.filter((c) => c.type !== T.GuildCategory);
+      const otherCategories = leftovers.filter((c) => c.type === T.GuildCategory);
+      const keptCategories = plan.keepCategories.map((c) => guild.channels.cache.get(c.id)).filter(Boolean);
+      const ordered = [...built.top, ...looseChannels, ...built.categories, ...otherCategories, ...keptCategories];
       try {
-        await ch.lockPermissions();
-        synced += 1;
-      } catch {
-        failed += 1;
+        await guild.channels.setPositions(ordered.map((c, i) => ({ channel: c.id, position: i })));
+      } catch (err) {
+        report.warnings.push(`I could not set the channel order (${err.message}). Drag the categories into place.`);
       }
     }
-    if (synced) report.updated.push(`🔐 ${synced} kanal(a) u \`${cat.name}\` usklađeno s kategorijom`);
-    if (failed) report.errors.push(`🔐 ${failed} kanal(a) u \`${cat.name}\` nije se dalo uskladiti`);
-  }
-
-  async _applyPositions(guild, order, report) {
-    if (!guild.channels || typeof guild.channels.setPositions !== 'function') return;
-    const list = [];
-    order.top.forEach((c, i) => list.push({ channel: c.id, position: i }));
-    order.categories.forEach((c, i) => list.push({ channel: c.id, position: i }));
-    for (const kids of order.children) kids.forEach((c, i) => list.push({ channel: c.id, position: i }));
-    if (!list.length) return;
-    try {
-      await guild.channels.setPositions(list);
-    } catch (err) {
-      report.warnings.push(`redoslijed kanala nije spremljen: ${err.message}`);
-    }
-  }
-
-  /** Post the verification panel into the verify channel unless it is already there. */
-  async _ensurePanel(guild, b, report) {
-    const ch = b.channels.verify_ch ? guild.channels.cache.get(b.channels.verify_ch) : null;
-    if (!ch || typeof ch.send !== 'function') return;
-    const me = guild.members.me;
-    try {
-      let present = false;
-      if (ch.messages && typeof ch.messages.fetch === 'function') {
-        const fetched = await ch.messages.fetch({ limit: 50 });
-        for (const m of fetched.values()) {
-          if (m && m.author && me && m.author.id === me.id && hasOpenButton(m)) {
-            present = true;
-            break;
-          }
+    if (guild.roles && typeof guild.roles.setPositions === 'function') {
+      const me = guild.members.me;
+      const stack = ROLE_STACK.map((k) => R[k] && R[k].id).filter(Boolean);
+      const anchor = R.verified && R.verified.position < me.roles.highest.position ? R.verified.id : null;
+      const moves = planRoleOrder([...guild.roles.cache.values()], { botTop: me.roles.highest.position, everyoneId: guild.id, anchorId: anchor, stack });
+      if (moves.length) {
+        try {
+          await guild.roles.setPositions(moves);
+        } catch (err) {
+          report.warnings.push(`I could not set the role order (${err.message}). Drag the new roles into place.`);
         }
       }
-      if (present) {
-        report.ok.push('🎫 verification panel');
-      } else {
-        await ch.send({ embeds: [panelEmbed()], components: [panelRow()] });
-        report.created.push(`🎫 verification panel u <#${ch.id}>`);
-      }
-    } catch (err) {
-      report.errors.push(`🎫 panel: ${err.message}`);
     }
-  }
-
-  _notes(guild, roles, report) {
-    const me = guild.members.me;
-    const botTop = me && me.roles && me.roles.highest ? me.roles.highest.position : null;
-    const above = Object.values(roles).filter((r) => r && botTop !== null && typeof r.position === 'number' && r.position >= botTop);
-    if (above.length) {
-      report.warnings.push(
-        `rola bota mora biti **iznad** ${above.map((r) => `<@&${r.id}>`).join(', ')} da bi ih mogao dodjeljivati (Server Settings → Roles).`,
-      );
-    }
-    const auto = this.roleMemory && typeof this.roleMemory.getGuildAutoRole === 'function' ? this.roleMemory.getGuildAutoRole(guild.id) : null;
-    if (auto && roles.verified && auto === roles.verified.id) {
-      report.warnings.push('auto rola (`/aa`) je ista kao VERIFIED, pa bi novi članovi preskočili verifikaciju. Postavi drugu auto rolu.');
-    }
-    report.warnings.push('ništa nije obrisano: role i kanale koje ne želiš obriši ručno.');
   }
 }
 
@@ -625,11 +733,16 @@ module.exports = {
   STYLE,
   BLANK_ROLE_NAME,
   ROLE_SPECS,
-  buildPlan,
+  ROLE_STACK,
+  buildLayout,
   normalizeName,
   isBlankName,
+  isPlusRole,
   permsFor,
   overwritesDiffer,
-  findChannel,
   hasOpenButton,
+  classifyChannels,
+  classifyRoles,
+  planRoleOrder,
+  listOf,
 };

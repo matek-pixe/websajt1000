@@ -1,7 +1,7 @@
 'use strict';
 
-const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, MessageFlags } = require('discord.js');
-const { COLORS } = require('./_shared');
+const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+const { card, field, deny, ephemeral, mention, time, joinList, COPY } = require('../ui');
 
 /** Manager, admins, or anyone with Manage Server / Manage Roles. */
 function canUse(interaction, ctx) {
@@ -15,71 +15,84 @@ function canUse(interaction, ctx) {
   );
 }
 
+/** Role mentions for roles that still exist, the raw id for the ones that do not. */
 const list = (guild, ids) =>
-  (ids.map((id) => (guild.roles.cache.has(id) ? `<@&${id}>` : `\`${id}\``)).join(', ') || '—').slice(0, 1024);
+  joinList(
+    ids.map((id) => (guild.roles.cache.has(id) ? mention.role(id) : `\`${id}\``)),
+    { max: 35, limit: 900 },
+  );
 
 /**
- * /roles — show what the bot remembers for a user, and whether it can restore it.
+ * /roles: show what the bot remembers for a member, and whether it can restore it.
  * Works for people who already left: paste their Discord ID.
  */
 module.exports = {
   managerOnly: false,
   data: new SlashCommandBuilder()
     .setName('roles')
-    .setDescription('STAFF: show the roles the bot remembers for a user (works even after they left).')
+    .setDescription('Show the roles the bot remembers for a member (staff only)')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
-    .addUserOption((opt) => opt.setName('user').setDescription('Pick a member.').setRequired(false))
+    .addUserOption((opt) => opt.setName('user').setDescription('Member to look up').setRequired(false))
     .addStringOption((opt) =>
-      opt.setName('id').setDescription('Or paste a Discord user ID (for someone who already left).').setRequired(false),
+      opt.setName('id').setDescription('Discord user ID, for someone who already left').setRequired(false),
     ),
 
   async execute(interaction, ctx) {
     if (!canUse(interaction, ctx)) {
       ctx.refundCooldown();
-      return interaction.reply({ content: '⛔ Only staff can use `/roles`.', flags: MessageFlags.Ephemeral });
+      return deny(interaction, COPY.staffOnly('roles'));
     }
     const user = interaction.options.getUser('user');
     const idOpt = (interaction.options.getString('id') || '').trim();
     const userId = user ? user.id : idOpt;
     if (!/^\d{15,22}$/.test(userId || '')) {
       ctx.refundCooldown();
-      return interaction.reply({ content: 'Pick a **user** or paste a valid Discord **user ID**.', flags: MessageFlags.Ephemeral });
+      return deny(interaction, 'No valid member or user ID was given. Pick a member or paste a Discord user ID.');
     }
 
     const guild = interaction.guild;
     const entry = ctx.roleMemory.getEntry(guild.id, userId);
     const inServer = guild.members.cache.has(userId) || !!(await guild.members.fetch(userId).catch(() => null));
 
-    const embed = new EmbedBuilder()
-      .setColor(COLORS.info)
-      .setTitle('🧠 Remembered roles')
-      .setDescription(
-        `<@${userId}>${entry && entry.username ? ` (${entry.username})` : ''} • ${inServer ? '🟢 in the server' : '⚪ not in the server'}`,
-      );
+    const fields = [];
+    let tone = 'neutral';
 
     if (!entry) {
-      embed.setColor(COLORS.warn).addFields({ name: 'Roles', value: '_Nothing remembered for this user yet._' });
+      tone = 'warn';
+      fields.push(field('Roles', 'Nothing remembered for this member yet.'));
     } else if (entry.roles.length === 0) {
-      embed.addFields({ name: 'Roles', value: '_No roles remembered (they had none)._' });
+      fields.push(field('Roles', 'No roles saved. The member had none.'));
     } else {
       const me = guild.members.me || (await guild.members.fetchMe().catch(() => null));
       const cls = ctx.roleMemory.classifyRemembered(guild, entry.roles, me);
-      embed.addFields({ name: `✅ Will be restored on return (${cls.ok.length})`, value: list(guild, cls.ok) });
+      fields.push(field(`Restored on return (${cls.ok.length})`, list(guild, cls.ok)));
       if (cls.aboveBot.length) {
-        embed.setColor(COLORS.warn).addFields({
-          name: `⚠️ Above my role, cannot restore (${cls.aboveBot.length})`,
-          value: `${list(guild, cls.aboveBot)}\nMove my role higher in **Server Settings → Roles**.`,
-        });
+        tone = 'warn';
+        fields.push(
+          field(
+            `Above the bot role (${cls.aboveBot.length})`,
+            `${list(guild, cls.aboveBot)}\nDrag the bot role above these roles in Server Settings, Roles.`,
+          ),
+        );
       }
-      if (cls.managed.length) embed.addFields({ name: `🤖 Managed by an integration (${cls.managed.length})`, value: list(guild, cls.managed) });
-      if (cls.missing.length) embed.addFields({ name: `🗑️ Deleted roles (${cls.missing.length})`, value: list(guild, cls.missing) });
+      if (cls.managed.length) fields.push(field(`Managed by an integration (${cls.managed.length})`, list(guild, cls.managed)));
+      if (cls.missing.length) fields.push(field(`Deleted roles (${cls.missing.length})`, list(guild, cls.missing)));
     }
     if (entry && entry.updatedAt) {
-      const ts = Math.floor(new Date(entry.updatedAt).getTime() / 1000);
-      if (Number.isFinite(ts)) embed.addFields({ name: '🕒 Last saved', value: `<t:${ts}:R>` });
+      const ms = new Date(entry.updatedAt).getTime();
+      if (Number.isFinite(ms)) fields.push(field('Last saved', time(ms)));
     }
 
-    await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+    const who = `${mention.user(userId)}${entry && entry.username ? ` (${entry.username})` : ''}`;
+    const embed = card({
+      title: 'Remembered roles',
+      description: `${who}\n${inServer ? 'In the server.' : 'Not in the server.'}`,
+      fields,
+      tone,
+      footer: 'Roles',
+    });
+
+    await ephemeral(interaction, { embeds: [embed] });
   },
 
   _canUse: canUse,

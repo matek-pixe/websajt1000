@@ -10,6 +10,7 @@ const { RoleMemoryService } = require('./services/roleMemory');
 const { TicketService } = require('./services/tickets');
 const { BypassService } = require('./services/bypass');
 const { SetupService } = require('./services/setup');
+const { card, deny, COPY } = require('./ui');
 const { Cooldown } = require('./services/cooldown');
 const { createWebServer } = require('./web/server');
 const fs = require('node:fs');
@@ -211,7 +212,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
   } catch (err) {
     console.error('[35xw] interaction error:', err);
-    const msg = { content: '❌ Došlo je do greške.', flags: MessageFlags.Ephemeral };
+    const msg = { embeds: [card({ description: COPY.failed, tone: 'danger', footer: false })], flags: MessageFlags.Ephemeral };
     try {
       if (interaction.isRepliable()) {
         if (interaction.deferred || interaction.replied) await interaction.followUp(msg);
@@ -226,51 +227,36 @@ client.on(Events.InteractionCreate, async (interaction) => {
 async function handleCommand(interaction) {
   const command = registry.commands.get(interaction.commandName);
   if (!command) {
-    return interaction.reply({ content: '❓ Nepoznata komanda.', flags: MessageFlags.Ephemeral });
+    return deny(interaction, COPY.unknownCommand);
   }
 
   const ctx = contextFor(interaction);
 
   // Verified-only commands must run on a server, where roles can be checked.
   if ((!command.allowDM || command.requiresVerified) && !interaction.inGuild()) {
-    return interaction.reply({ content: '⚠️ Ovu komandu možeš koristiti samo na serveru.', flags: MessageFlags.Ephemeral });
+    return deny(interaction, COPY.serverOnly);
   }
 
   if (command.managerOnly && !isManager(interaction.user)) {
-    return interaction.reply({
-      content: `⛔ Samo menadžer (**${config.manager.username}**) smije koristiti \`/${interaction.commandName}\`.`,
-      flags: MessageFlags.Ephemeral,
-    });
+    return deny(interaction, COPY.managerOnly(interaction.commandName));
   }
 
   // Owner-only commands (/n, /setup): the server owner, plus the manager.
   if (command.ownerOnly && !isOwnerOrManager(interaction)) {
-    return interaction.reply({
-      content: `⛔ Samo **vlasnik servera** smije koristiti \`/${interaction.commandName}\`.`,
-      flags: MessageFlags.Ephemeral,
-    });
+    return deny(interaction, COPY.ownerOnly(interaction.commandName));
   }
 
   // Commands "for everyone" are really for verified members: the role handed out after a ticket.
   if (command.requiresVerified) {
     const gate = setup.verifiedGate(interaction.guild, interaction.member, interaction.user, { isManager, isBypass: (u) => bypass.applies(u) });
-    if (!gate.ok) {
-      const where = gate.channelId ? ` Otvori ticket u <#${gate.channelId}>` : ' Otvori ticket';
-      return interaction.reply({
-        content: `⛔ Ova komanda je samo za **verificirane** članove.${where} da dobiješ rolu <@&${gate.roleId}>.`,
-        flags: MessageFlags.Ephemeral,
-      });
-    }
+    if (!gate.ok) return deny(interaction, COPY.notVerified(gate));
   }
 
   // Commands flagged noCooldown skip the limit, and so does the manager while /b bypass is on.
   if (!bypass.skipsCooldown(command, interaction.user)) {
     const left = cooldown.remaining(ctx.cooldownKey);
     if (left > 0) {
-      return interaction.reply({
-        content: `⏳ Prebrzo! Pričekaj još **${Math.ceil(left / 1000)}s** prije ponovnog \`/${interaction.commandName}\`.`,
-        flags: MessageFlags.Ephemeral,
-      });
+      return deny(interaction, COPY.cooldown(Math.ceil(left / 1000), interaction.commandName));
     }
     // Spend the cooldown up front so a rapid double-invoke is blocked; commands refund on no-op/error.
     cooldown.hit(ctx.cooldownKey);

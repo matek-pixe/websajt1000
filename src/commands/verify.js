@@ -2,10 +2,13 @@
 
 const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
 const { BUTTONS, panelEmbed, panelRow } = require('../services/tickets');
-const { say, openTicketFlow, requireTicket } = require('./_tickets');
+const { card, say, deny, warn, mention, COPY } = require('../ui');
+const { openTicketFlow, requireTicket } = require('./_tickets');
+
+const ALREADY_CLOSING = 'This ticket is already being closed.';
 
 /**
- * /v — post the 35xw verification panel with the OPEN TICKET button.
+ * /v: post the 35xw verification panel with the OPEN TICKET button.
  * This module also owns every "tk:" button (open / close).
  */
 module.exports = {
@@ -13,19 +16,19 @@ module.exports = {
   buttonPrefix: 'tk:',
   data: new SlashCommandBuilder()
     .setName('v')
-    .setDescription('Post the 35xw verification panel with an OPEN TICKET button.')
+    .setDescription('Post the verification panel with a ticket button (staff only)')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .addRoleOption((opt) =>
       opt
         .setName('staff')
-        .setDescription('Staff role that can see and manage every ticket (optional).')
+        .setDescription('Staff role that can see and manage every ticket (optional)')
         .setRequired(false),
     ),
 
   async execute(interaction, ctx) {
     if (!ctx.tickets.isStaff(interaction.member, interaction.guildId)) {
       ctx.refundCooldown();
-      return say(interaction, '⛔ Only the bot manager or a server admin can post the verification panel.');
+      return deny(interaction, COPY.staffOnly('v'));
     }
 
     const staff = interaction.options.getRole('staff');
@@ -34,8 +37,8 @@ module.exports = {
     // Posted as a plain bot message (not as the command reply) so it looks clean.
     await interaction.channel.send({ embeds: [panelEmbed()], components: [panelRow()] });
 
-    const staffNote = staff ? ` Staff role set to <@&${staff.id}>.` : '';
-    return interaction.reply({ content: `✅ Verification panel posted.${staffNote}`, flags: MessageFlags.Ephemeral });
+    const staffNote = staff ? ` Staff role set to ${mention.role(staff.id)}.` : '';
+    return say(interaction, `Verification panel posted.${staffNote}`, 'ok');
   },
 
   async handleButton(interaction, ctx) {
@@ -50,13 +53,16 @@ module.exports = {
       if (!ticket) return undefined;
       const isOpener = interaction.user.id === ticket.userId;
       if (!isOpener && !ctx.tickets.isStaff(interaction.member, interaction.guildId)) {
-        return say(interaction, '⛔ Only the ticket opener or staff can close this ticket.');
+        return deny(interaction, 'Only the ticket opener or staff can close this ticket.');
       }
-      if (ticket.status !== 'open') return say(interaction, 'This ticket is already being closed.');
+      if (ticket.status !== 'open') return warn(interaction, ALREADY_CLOSING);
       await interaction.update({ components: [] }); // disable the Close button that was pressed
       const res = await ctx.tickets.closeTicket(interaction.channel, interaction.user);
       if (!res.ok && res.reason === 'in_progress') {
-        await interaction.followUp({ content: 'This ticket is already being closed.', flags: MessageFlags.Ephemeral }).catch(() => {});
+        // update() already answered the button, so a plain say() would edit the ticket message instead.
+        await interaction
+          .followUp({ embeds: [card({ description: ALREADY_CLOSING, tone: 'warn', footer: false })], flags: MessageFlags.Ephemeral })
+          .catch(() => {});
       }
       return undefined;
     }

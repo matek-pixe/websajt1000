@@ -8,7 +8,7 @@ module.exports = {
   requiresVerified: true, // only members holding the VERIFIED role (given after a ticket)
   data: new SlashCommandBuilder()
     .setName('5m')
-    .setDescription('Dobij FiveM račun koji nitko još nikada nije generirao.'),
+    .setDescription('Get a FiveM account that was never given out'),
   async execute(interaction, ctx) {
     await giveAccount(interaction, ctx, 'fivem');
   },

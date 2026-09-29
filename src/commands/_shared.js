@@ -1,26 +1,9 @@
 'use strict';
 
-const { EmbedBuilder, MessageFlags } = require('discord.js');
+const { MessageFlags } = require('discord.js');
 const { formatAccount } = require('../services/accounts');
 
-const COLORS = {
-  ok: 0x2ecc71,
-  info: 0x5865f2,
-  warn: 0xf1c40f,
-  danger: 0xe74c3c,
-};
-
-/** Reply (or edit the reply) with an ephemeral message, whichever is valid for the interaction's state. */
-async function ephemeral(interaction, payload) {
-  const data = typeof payload === 'string' ? { content: payload } : { ...payload };
-  if (interaction.deferred || interaction.replied) {
-    // Ephemeral state is fixed at defer/reply time; editReply must not carry the flag.
-    delete data.flags;
-    return interaction.editReply(data);
-  }
-  data.flags = MessageFlags.Ephemeral;
-  return interaction.reply(data);
-}
+const { COLORS, ephemeral, card, field, deny, mention, num, codeBlock } = require('../ui');
 
 /**
  * Hand out one account from the given pool to the caller.
@@ -37,23 +20,25 @@ async function giveAccount(interaction, ctx, type) {
 
   if (account === null) {
     ctx.refundCooldown(); // empty pool should not burn the user's cooldown
-    const embed = new EmbedBuilder()
-      .setColor(COLORS.warn)
-      .setTitle(`${info.emoji} Nema ${info.label} računa`)
-      .setDescription(
-        `Trenutno nema slobodnih **${info.label}** računa.\n` +
-          `Pričekaj da menadžer napuni zalihu pa pokušaj ponovno.`,
-      );
-    return ephemeral(interaction, { embeds: [embed] });
+    return ephemeral(interaction, {
+      embeds: [
+        card({
+          title: `${info.emoji} No ${info.label} accounts left`,
+          description: 'The pool is empty, so try again after the manager refills it.',
+          tone: 'warn',
+          footer: info.label,
+        }),
+      ],
+    });
   }
 
-  const embed = new EmbedBuilder()
-    .setColor(COLORS.ok)
-    .setTitle(`${info.emoji} Tvoj ${info.label} račun`)
-    .setDescription('Ovaj račun je samo tvoj i nikada nije bio dan nikome drugom. Čuvaj ga.')
-    .addFields({ name: 'Račun', value: '```\n' + formatAccount(account) + '\n```' })
-    .setFooter({ text: `35xw • ${info.label}` })
-    .setTimestamp();
+  const embed = card({
+    title: `${info.emoji} ${info.label} account`,
+    description: 'This account is yours alone and was never given out before.',
+    fields: [field('Details', codeBlock(formatAccount(account)))],
+    tone: 'ok',
+    footer: info.label,
+  });
 
   try {
     return await ephemeral(interaction, { embeds: [embed] });
@@ -77,7 +62,7 @@ async function doRefill(interaction, ctx, type) {
   if (attachment.size > ctx.config.maxRefillFileBytes) {
     ctx.refundCooldown();
     const mb = (ctx.config.maxRefillFileBytes / (1024 * 1024)).toFixed(0);
-    return ephemeral(interaction, `❌ Datoteka je prevelika. Maksimum je ${mb} MB.`);
+    return deny(interaction, `That file is over the ${mb} MB limit. Split it into smaller files and upload them one at a time.`);
   }
 
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -89,30 +74,30 @@ async function doRefill(interaction, ctx, type) {
     text = await res.text();
   } catch (err) {
     ctx.refundCooldown();
-    return ephemeral(interaction, `❌ Nisam mogao preuzeti datoteku: ${err.message}`);
+    return deny(interaction, `Could not download the file (${err.message}). Wait a moment and run the command again.`);
   }
 
   const result = ctx.accounts.refill(type, text, interaction.user);
 
   const nameNote =
     attachment.name && attachment.name.toLowerCase() !== info.file
-      ? `\n⚠️ Datoteka se zove \`${attachment.name}\`, očekivano \`${info.file}\` (svejedno je učitano).`
+      ? `\nThe file is named \`${attachment.name}\` instead of \`${info.file}\`. It was imported anyway.`
       : '';
 
-  const embed = new EmbedBuilder()
-    .setColor(result.added > 0 ? COLORS.ok : COLORS.warn)
-    .setTitle(`${info.emoji} ${info.label} zaliha napunjena`)
-    .setDescription(`Učitao: <@${interaction.user.id}>${nameNote}`)
-    .addFields(
-      { name: 'Novih računa', value: String(result.added), inline: true },
-      { name: 'Slobodno sada', value: String(result.available), inline: true },
-      { name: 'Ukupno podijeljeno', value: String(result.givenTotal), inline: true },
-      { name: 'Već u zalihi', value: String(result.alreadyAvailable), inline: true },
-      { name: 'Već podijeljeni (preskočeno)', value: String(result.alreadyGiven), inline: true },
-      { name: 'Duplikati u datoteci', value: String(result.duplicatesInFile), inline: true },
-    )
-    .setFooter({ text: `35xw • spremljeno u ${info.file}` })
-    .setTimestamp();
+  const embed = card({
+    title: `${info.emoji} ${info.label} pool refilled`,
+    description: `Uploaded by ${mention.user(interaction.user.id)}.${nameNote}`,
+    fields: [
+      field('Added', num(result.added), true),
+      field('In stock', num(result.available), true),
+      field('Given out so far', num(result.givenTotal), true),
+      field('Already in stock', num(result.alreadyAvailable), true),
+      field('Already given', num(result.alreadyGiven), true),
+      field('Duplicates in file', num(result.duplicatesInFile), true),
+    ],
+    tone: result.added > 0 ? 'ok' : 'warn',
+    footer: info.file,
+  });
 
   return ephemeral(interaction, { embeds: [embed] });
 }

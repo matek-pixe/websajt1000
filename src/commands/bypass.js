@@ -1,15 +1,15 @@
 'use strict';
 
-const { SlashCommandBuilder, EmbedBuilder, MessageFlags } = require('discord.js');
-const { COLORS } = require('./_shared');
+const { SlashCommandBuilder } = require('discord.js');
+const { card, field, ephemeral, mention, time, lines } = require('../ui');
 
-const LIMITS_OFF = '• no cooldown on any command (`/steam`, `/5m`, `/combo`, …)\n• unlimited open tickets, no 10-minute wait';
+const LIMITS_LIFTED = 'No cooldown on any command. No open ticket limit and no 10 minute wait.';
 
 /**
- * /b — bypass ("god mode"). Manager only.
+ * /b: bypass ("god mode"). Manager only.
  *   /b                      toggle your own bypass
  *   /b mode:On|Off          set your own bypass
- *   /b user:@someone        give that person bypass (or take it away if they have it)
+ *   /b user:@someone        give that member bypass (or take it away if they have it)
  *   /b user:@someone mode:On|Off
  *   /b mode:List            who has bypass right now
  */
@@ -19,14 +19,14 @@ module.exports = {
   allowDM: true,
   data: new SlashCommandBuilder()
     .setName('b')
-    .setDescription('MANAGER: bypass mode — no limits for you, or for someone you give it to.')
+    .setDescription('Lift every limit for yourself or a member (manager only)')
     .addUserOption((opt) =>
-      opt.setName('user').setDescription('Give / remove bypass for this person (leave empty for yourself).').setRequired(false),
+      opt.setName('user').setDescription('Member to give or remove bypass for (leave empty for yourself)').setRequired(false),
     )
     .addStringOption((opt) =>
       opt
         .setName('mode')
-        .setDescription('On / Off (leave empty to toggle), or List to see who has bypass.')
+        .setDescription('On or off (leave empty to toggle), or List to show who has bypass')
         .setRequired(false)
         .addChoices({ name: 'On', value: 'on' }, { name: 'Off', value: 'off' }, { name: 'List', value: 'list' }),
     ),
@@ -35,22 +35,21 @@ module.exports = {
     const mode = interaction.options.getString('mode');
     const target = interaction.options.getUser('user');
     const managerId = ctx.config.manager.id;
-    const reply = (embed) => interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+    const reply = (embed) => ephemeral(interaction, { embeds: [embed] });
 
     // ---- who has it ----
     if (mode === 'list') {
       const rows = ctx.bypass.list();
-      const people = rows.length
-        ? rows.map((r) => `• <@${r.id}>${r.at ? ` — since <t:${Math.floor(new Date(r.at).getTime() / 1000)}:d>` : ''}`).join('\n')
-        : '_Nobody else has bypass._';
+      const members = rows.map((r) => `${mention.user(r.id)}${r.at ? ` since ${time(new Date(r.at).getTime(), 'd')}` : ''}`);
       return reply(
-        new EmbedBuilder()
-          .setColor(COLORS.info)
-          .setTitle('⚡ Bypass list')
-          .addFields(
-            { name: 'Your switch', value: ctx.bypass.isEnabled() ? '🟢 ON' : '⚪ OFF' },
-            { name: `Given to (${rows.length})`, value: people.slice(0, 1024) },
-          ),
+        card({
+          title: 'Bypass list',
+          fields: [
+            field('Your switch', ctx.bypass.isEnabled() ? 'On' : 'Off'),
+            field(`Given to (${rows.length})`, lines(members, { max: 15, limit: 1024 })),
+          ],
+          footer: 'bypass',
+        }),
       );
     }
 
@@ -63,14 +62,20 @@ module.exports = {
 
       return reply(
         on
-          ? new EmbedBuilder()
-              .setColor(COLORS.ok)
-              .setTitle('⚡ Bypass given')
-              .setDescription(`<@${target.id}> now skips every limit:\n${LIMITS_OFF}\n\nRemove it with \`/b user:@${target.username} mode:Off\`.`)
-          : new EmbedBuilder()
-              .setColor(COLORS.warn)
-              .setTitle('Bypass removed')
-              .setDescription(`<@${target.id}> is back to the normal limits.`),
+          ? card({
+              title: 'Bypass granted',
+              description:
+                `${mention.user(target.id)} now skips every limit. ${LIMITS_LIFTED}\n\n` +
+                `Remove it with \`/b user:@${target.username} mode:Off\`.`,
+              tone: 'ok',
+              footer: 'bypass',
+            })
+          : card({
+              title: 'Bypass removed',
+              description: `${mention.user(target.id)} is back to the normal limits.`,
+              tone: 'ok',
+              footer: 'bypass',
+            }),
       );
     }
 
@@ -82,11 +87,15 @@ module.exports = {
 
     return reply(
       on
-        ? new EmbedBuilder()
-            .setColor(COLORS.ok)
-            .setTitle('⚡ Bypass ON')
-            .setDescription(`Every limit is switched off for you:\n${LIMITS_OFF}\n\nUse \`/b\` again to turn it off. Give it to someone with \`/b user:@name\`.`)
-        : new EmbedBuilder().setColor(COLORS.warn).setTitle('Bypass OFF').setDescription('Normal limits apply to you again.'),
+        ? card({
+            title: 'Bypass on',
+            description:
+              `Every limit is lifted for you. ${LIMITS_LIFTED}\n\n` +
+              'Run `/b` again to turn it off, or `/b user:@name` to give it to a member.',
+            tone: 'ok',
+            footer: 'bypass',
+          })
+        : card({ title: 'Bypass off', description: 'Normal limits apply to you again.', tone: 'ok', footer: 'bypass' }),
     );
   },
 };

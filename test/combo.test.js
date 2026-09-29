@@ -38,7 +38,8 @@ const ctxFor = (accounts) => {
   const c = { accounts, refunded: 0, refundCooldown() { c.refunded += 1; } };
   return c;
 };
-const fields = (i) => i._st.edits.at(-1).embeds[0].toJSON().fields;
+const embed = (i) => i._st.edits.at(-1).embeds[0].toJSON();
+const fields = (i) => embed(i).fields;
 
 test('/combo gives one Steam and one FiveM account, formatted one below the other', async () => {
   const { dir, accounts } = setup();
@@ -51,9 +52,10 @@ test('/combo gives one Steam and one FiveM account, formatted one below the othe
 
     assert.equal(i._st.deferred.flags, 64); // ephemeral
     const f = fields(i);
-    assert.equal(f[0].name, '🎮 Steam');
+    assert.equal(embed(i).title, 'Your combo');
+    assert.equal(f[0].name, 'Steam');
     assert.ok(f[0].value.includes('👤 Username: gamer') && f[0].value.includes('🔑 Password: pw1'));
-    assert.equal(f[1].name, '🚗 FiveM');
+    assert.equal(f[1].name, 'FiveM');
     assert.ok(f[1].value.includes('📧 Email:    mail@x.y') && f[1].value.includes('🔹 Extra 1:  code'));
     assert.equal(accounts.stats('steam').given, 1);
     assert.equal(accounts.stats('fivem').given, 1);
@@ -72,7 +74,8 @@ test('/combo still gives the available one when the other pool is empty', async 
     await combo.execute(i, ctx);
     const f = fields(i);
     assert.ok(f[0].value.includes('only'));
-    assert.ok(f[1].value.includes('nema slobodnih'));
+    assert.equal(f[1].value, 'Out of stock');
+    assert.ok(embed(i).description.includes('Only the Steam pool had stock'));
     assert.equal(ctx.refunded, 0);
   } finally {
     rm(dir);
@@ -85,7 +88,8 @@ test('/combo with both pools empty refunds the cooldown and explains', async () 
     const i = fakeInteraction();
     const ctx = ctxFor(accounts);
     await combo.execute(i, ctx);
-    assert.ok(i._st.edits.at(-1).embeds[0].toJSON().description.includes('prazne'));
+    assert.equal(embed(i).title, 'No accounts left');
+    assert.ok(embed(i).description.includes('empty'));
     assert.equal(ctx.refunded, 1);
   } finally {
     rm(dir);
