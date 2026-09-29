@@ -180,7 +180,7 @@ class LogService {
         title: 'Logging is on',
         description: this.settings.messageContent
           ? 'Deleted and edited messages include their text.'
-          : 'Message text is not logged. Turn on the Message Content Intent and LOG_MESSAGE_CONTENT to include it.',
+          : 'Message text is not logged yet. To include it, turn on the Message Content Intent in the Developer Portal, then set LOG_MESSAGE_CONTENT=true and restart.',
         footer: 'logs',
         timestamp: true,
       }),
