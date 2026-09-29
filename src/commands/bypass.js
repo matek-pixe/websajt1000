@@ -3,7 +3,7 @@
 const { SlashCommandBuilder } = require('discord.js');
 const { card, field, ephemeral, mention, time, lines } = require('../ui');
 
-const LIMITS_LIFTED = 'No cooldown on any command. No open ticket limit and no 10 minute wait.';
+const LIMITS_LIFTED = 'No command cooldown, no open ticket limit and no wait after closing a ticket.';
 
 /**
  * /b: bypass ("god mode"). Manager only.

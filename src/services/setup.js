@@ -56,44 +56,80 @@ const ROLE_STACK = Object.freeze(['blank', 'friend', 'vip', 'support', 'coowner'
  * belongs to the ticket service, and the kept categories are appended after everything else.
  */
 function buildLayout(siteName) {
-  const voice = (n) => ({ key: `voice${n}`, name: STYLE('🔊', `VOICE #${n}`), type: T.GuildVoice, perms: 'members' });
+  const text = (key, icon, label, perms, topic) => ({ key, name: STYLE(icon, label), type: T.GuildText, perms, topic });
+  const voice = (key, icon, label, perms) => ({ key, name: STYLE(icon, label), type: T.GuildVoice, perms });
   return {
-    top: [{ key: 'site', name: STYLE('🌐', siteName), type: T.GuildVoice, perms: 'reminder' }],
+    top: [voice('site', '🌐', siteName, 'reminder')],
     categories: [
       {
         key: 'private',
         name: STYLE('🔒', 'PRIVATE'),
         perms: 'private',
         channels: [
-          { key: 'priv_chat', name: STYLE('🔒', 'PRIV-CHAT'), type: T.GuildText, perms: 'private', topic: 'Private chat for admins and the priv role.' },
-          { key: 'priv', name: STYLE('🔒', 'PRIV'), type: T.GuildVoice, perms: 'private' },
+          text('priv_chat', '🔒', 'PRIV-CHAT', 'private', 'Private chat for admins and the priv role.'),
+          voice('priv', '🔒', 'PRIV', 'private'),
         ],
       },
       {
         key: 'verify',
         name: STYLE('✅', 'VERIFY'),
         perms: 'verify',
-        channels: [
-          { key: 'verify_ch', name: STYLE('🎫', 'VERIFY'), type: T.GuildText, perms: 'verify', topic: 'Open a ticket to get access to the server.', panel: true },
-        ],
+        channels: [{ ...text('verify_ch', '🎫', 'VERIFY', 'verify', 'Open a ticket to get access to the server.'), panel: true }],
       },
       { key: 'tickets', managed: true },
+      {
+        key: 'info',
+        name: STYLE('📌', 'INFO'),
+        perms: 'info',
+        channels: [
+          text('rules', '📜', 'RULES', 'info', 'Read these before you do anything else.'),
+          text('announcements', '📢', 'ANNOUNCEMENTS', 'info', 'News and announcements.'),
+          text('changelog', '🛠️', 'CHANGELOG', 'info', 'What changed and when.'),
+          text('information', 'ℹ️', 'INFORMATION', 'info', 'How everything here works.'),
+        ],
+      },
       {
         key: 'general',
         name: STYLE('🌍', 'GENERAL'),
         perms: 'members',
         channels: [
-          { key: 'chat', name: STYLE('💬', 'CHAT'), type: T.GuildText, perms: 'members', topic: 'General chat for verified members.' },
-          { key: 'cmds', name: STYLE('🤖', 'CMDS'), type: T.GuildText, perms: 'members', topic: 'Bot commands go here.' },
-          { key: 'server', name: STYLE('📢', 'SERVER'), type: T.GuildText, perms: 'members', topic: 'News and info about the server.' },
-          { key: 'dump', name: STYLE('🗑️', 'DUMP'), type: T.GuildText, perms: 'members', topic: 'Anything goes. Media, links, random.' },
+          text('chat', '💬', 'CHAT', 'members', 'General chat for verified members.'),
+          text('balkan', '🌍', 'BALKAN', 'members', 'Chat in your own language.'),
+          text('cmds', '🤖', 'CMDS', 'members', 'Bot commands go here.'),
+          text('gen', '🎮', 'GEN', 'members', 'Use /steam, /5m and /combo here.'),
+          text('server', '📢', 'SERVER', 'members', 'News and info about the server.'),
+          text('dump', '🗑️', 'DUMP', 'members', 'Anything goes. Media, links, random.'),
         ],
       },
       {
         key: 'voice',
         name: STYLE('🔊', 'VOICE'),
         perms: 'members',
-        channels: [voice(1), voice(2), voice(3)],
+        channels: [
+          voice('voice1', '🔊', 'VOICE #1', 'members'),
+          voice('voice2', '🔊', 'VOICE #2', 'members'),
+          voice('voice3', '🔊', 'VOICE #3', 'members'),
+          voice('balkan_voice', '🌍', 'BALKAN', 'members'),
+          voice('afk', '💤', 'AFK', 'members'),
+        ],
+      },
+      {
+        key: 'vip',
+        name: STYLE('💎', 'VIP'),
+        perms: 'vip',
+        channels: [text('vip_chat', '💎', 'VIP-CHAT', 'vip', 'For VIP members.'), voice('vip_voice', '💎', 'VIP VOICE', 'vip')],
+      },
+      {
+        key: 'staff',
+        name: STYLE('🛡️', 'STAFF'),
+        perms: 'staff',
+        channels: [
+          text('staff_news', '📣', 'STAFF-NEWS', 'staff', 'Announcements for the team.'),
+          text('staff_chat', '💬', 'STAFF-CHAT', 'staff', 'Team chat.'),
+          text('reports', '🚩', 'REPORTS', 'staff', 'Reports from members.'),
+          text('logs', '📋', 'LOGS', 'staff', 'Logs from bots and moderation.'),
+          voice('staff_voice', '🛡️', 'STAFF VOICE', 'staff'),
+        ],
       },
     ],
   };
@@ -111,6 +147,9 @@ const NO_JOIN = [P.Connect, P.Speak];
  *
  *  verify    everyone reads but cannot post; the verified role no longer sees it; staff still does
  *  members   hidden from everyone except the verified role and staff
+ *  info      like members, but verified members can only read
+ *  vip       the VIP role and staff only
+ *  staff     the support role and the co-owner role only
  *  private   the server owner and the priv role only
  *  reminder  visible to everyone, nobody can join
  */
@@ -130,6 +169,24 @@ function permsFor(kind, ids, held) {
       rows.push(role(ids.everyone, undefined, H([P.ViewChannel])));
       if (ids.verified) rows.push(role(ids.verified, H(FULL)));
       if (ids.support) rows.push(role(ids.support, H(FULL)));
+      if (ids.manager) rows.push(member(ids.manager, H(FULL)));
+      break;
+    case 'info':
+      rows.push(role(ids.everyone, undefined, H([P.ViewChannel])));
+      if (ids.verified) rows.push(role(ids.verified, H(READ), H(NO_POST)));
+      if (ids.support) rows.push(role(ids.support, H(FULL)));
+      if (ids.manager) rows.push(member(ids.manager, H(FULL)));
+      break;
+    case 'vip':
+      rows.push(role(ids.everyone, undefined, H([P.ViewChannel])));
+      if (ids.vip) rows.push(role(ids.vip, H(FULL)));
+      if (ids.support) rows.push(role(ids.support, H(FULL)));
+      if (ids.manager) rows.push(member(ids.manager, H(FULL)));
+      break;
+    case 'staff':
+      rows.push(role(ids.everyone, undefined, H([P.ViewChannel])));
+      if (ids.support) rows.push(role(ids.support, H(FULL)));
+      if (ids.coowner) rows.push(role(ids.coowner, H(FULL)));
       if (ids.manager) rows.push(member(ids.manager, H(FULL)));
       break;
     case 'private':
@@ -510,6 +567,8 @@ class SetupService {
         manager: managerId && managerId !== guild.ownerId && guild.members.cache.has(managerId) ? managerId : null,
         verified: R.verified ? R.verified.id : null,
         support: R.support ? R.support.id : null,
+        vip: R.vip ? R.vip.id : null,
+        coowner: R.coowner ? R.coowner.id : null,
         priv: plan.opts.privId || (R.coowner ? R.coowner.id : null),
       };
       if (R.support) this.tickets.setStaffRole(guild.id, R.support.id);

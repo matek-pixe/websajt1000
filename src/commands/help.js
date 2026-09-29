@@ -24,10 +24,10 @@ module.exports = {
         field(
           'Verified members',
           lines([
-            entry('/steam', 'Get a Steam account from the pool'),
-            entry('/5m', 'Get a FiveM account from the pool'),
+            entry('/steam', 'Get a Steam account that was never given out'),
+            entry('/5m', 'Get a FiveM account that was never given out'),
             entry('/combo', 'Get a Steam and a FiveM account at once'),
-            entry('/stats', 'Show the Rastrošan board'),
+            entry('/stats', 'Show the Rastrošan board and the top members'),
             entry('/ping', 'Show the bot latency'),
             entry('/help', 'Show this list'),
           ]),
@@ -36,32 +36,32 @@ module.exports = {
           'Tickets',
           lines([
             entry('OPEN TICKET', 'Open a ticket from the verification panel, one at a time per member'),
-            entry('/close', 'Close the ticket and save its transcript (the opener or staff)'),
-            entry('/add', 'Add a member or a role to the ticket (staff)'),
-            entry('/v', 'Post the verification panel (staff)'),
+            entry('/close', 'Close the current ticket and save the transcript (the opener or staff)'),
+            entry('/add', 'Add a member or role to the current ticket (staff only)'),
+            entry('/v', 'Post the verification panel with a ticket button (staff only)'),
           ]),
         ),
         field(
           'Roles',
           lines([
-            entry('/aa', 'Set the role every new member gets, or show it (server owner)'),
-            entry('/f', 'Give a role to every member, or remove it (admins)'),
-            entry('/roles', 'Show the roles saved for a member, even after they left (staff)'),
+            entry('/aa', 'Set the role every new member gets, or show it (owner only)'),
+            entry('/f', 'Give or remove a role for every member (admins only)'),
+            entry('/roles', 'Show the roles the bot remembers for a member, even after they left (staff only)'),
           ]),
         ),
         field(
           'Server owner',
           lines([
-            entry('/setup server', 'Rebuild the whole server layout after a preview and a confirmation'),
+            entry('/setup server', 'Rebuild the server layout and roles after a preview and a confirmation'),
             entry('/n', 'Delete every channel except zavrseno after a confirmation'),
           ]),
         ),
         field(
           'Manager',
           lines([
-            entry('/refills', 'Refill the Steam pool from steam.txt'),
-            entry('/refill5', 'Refill the FiveM pool from fivem.txt'),
-            entry('/b', 'Switch off cooldowns and ticket limits for yourself or a member, or list who has it'),
+            entry('/refills', 'Refill the Steam pool from a steam.txt file'),
+            entry('/refill5', 'Refill the FiveM pool from a fivem.txt file'),
+            entry('/b', 'Lift every limit for yourself or a member, or list who has it'),
           ]),
         ),
       ],

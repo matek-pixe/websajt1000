@@ -261,6 +261,18 @@ test('permsFor: explicit overwrite types, verified hidden from verify, priv limi
   const members = permsFor('members', ids, held);
   assert.ok(!get(members, 'V').allow.includes(P.Connect));
   assert.ok(get(members, 'V').allow.includes(P.ViewChannel));
+  const withVip = { ...ids, vip: 'VIP', coowner: 'CO' };
+  const info = permsFor('info', withVip, all);
+  assert.ok(get(info, 'V').allow.includes(P.ViewChannel));
+  assert.ok(get(info, 'V').deny.includes(P.SendMessages));
+  assert.ok(get(info, 'S').allow.includes(P.SendMessages));
+  const vip = permsFor('vip', withVip, all);
+  assert.ok(get(vip, 'VIP').allow.includes(P.ViewChannel));
+  assert.equal(get(vip, 'V'), undefined);
+  const staff = permsFor('staff', withVip, all);
+  assert.ok(get(staff, 'S').allow.includes(P.ViewChannel));
+  assert.ok(get(staff, 'CO').allow.includes(P.ViewChannel));
+  assert.equal(get(staff, 'VIP'), undefined);
   assert.throws(() => permsFor('nope', ids, all));
 });
 
@@ -468,8 +480,11 @@ test('execute rebuilds the layout: new things exist, old ones are gone, kept thi
     const kids = (c) => [...g.channels.cache.values()].filter((x) => x.parentId === c.id).map((x) => x.name);
     assert.deepEqual(kids(cat('🔒 ıl PRIVATE')), ['🔒 ıl PRIV-CHAT', '🔒 ıl PRIV']);
     assert.deepEqual(kids(cat('✅ ıl VERIFY')), ['🎫 ıl VERIFY']);
-    assert.deepEqual(kids(cat('🌍 ıl GENERAL')), ['💬 ıl CHAT', '🤖 ıl CMDS', '📢 ıl SERVER', '🗑️ ıl DUMP']);
-    assert.deepEqual(kids(cat('🔊 ıl VOICE')), ['🔊 ıl VOICE #1', '🔊 ıl VOICE #2', '🔊 ıl VOICE #3']);
+    assert.deepEqual(kids(cat('📌 ıl INFO')), ['📜 ıl RULES', '📢 ıl ANNOUNCEMENTS', '🛠️ ıl CHANGELOG', 'ℹ️ ıl INFORMATION']);
+    assert.deepEqual(kids(cat('🌍 ıl GENERAL')), ['💬 ıl CHAT', '🌍 ıl BALKAN', '🤖 ıl CMDS', '🎮 ıl GEN', '📢 ıl SERVER', '🗑️ ıl DUMP']);
+    assert.deepEqual(kids(cat('🔊 ıl VOICE')), ['🔊 ıl VOICE #1', '🔊 ıl VOICE #2', '🔊 ıl VOICE #3', '🌍 ıl BALKAN', '💤 ıl AFK']);
+    assert.deepEqual(kids(cat('💎 ıl VIP')), ['💎 ıl VIP-CHAT', '💎 ıl VIP VOICE']);
+    assert.deepEqual(kids(cat('🛡️ ıl STAFF')), ['📣 ıl STAFF-NEWS', '💬 ıl STAFF-CHAT', '🚩 ıl REPORTS', '📋 ıl LOGS', '🛡️ ıl STAFF VOICE']);
     assert.equal(byName(g, '🔒 ıl PRIV').type, T.GuildVoice);
     assert.equal(byName(g, '💬 ıl CHAT').topic, 'General chat for verified members.');
 
@@ -501,6 +516,31 @@ test('execute rebuilds the layout: new things exist, old ones are gone, kept thi
       assert.ok(allows(ch, 'OWNER', P.ViewChannel), n);
       assert.ok(!ow(ch, VERIFIED), n);
     }
+    // info is read-only for verified members, staff can post
+    for (const n of ['📌 ıl INFO', '📜 ıl RULES', 'ℹ️ ıl INFORMATION']) {
+      const ch = byName(g, n);
+      assert.ok(denies(ch, 'G', P.ViewChannel), n);
+      assert.ok(allows(ch, VERIFIED, P.ViewChannel), n);
+      assert.ok(denies(ch, VERIFIED, P.SendMessages), n);
+      assert.ok(allows(ch, support.id, P.SendMessages), n);
+    }
+    // VIP area: the VIP role and staff, not plain verified members
+    const vipRole = g.roles.cache.get('VIP');
+    for (const n of ['💎 ıl VIP', '💎 ıl VIP-CHAT', '💎 ıl VIP VOICE']) {
+      const ch = byName(g, n);
+      assert.ok(denies(ch, 'G', P.ViewChannel), n);
+      assert.ok(allows(ch, vipRole.id, P.ViewChannel), n);
+      assert.ok(allows(ch, support.id, P.ViewChannel), n);
+      assert.ok(!ow(ch, VERIFIED), n);
+    }
+    // staff area: support and co-owner only
+    for (const n of ['🛡️ ıl STAFF', '📋 ıl LOGS', '🛡️ ıl STAFF VOICE']) {
+      const ch = byName(g, n);
+      assert.ok(denies(ch, 'G', P.ViewChannel), n);
+      assert.ok(allows(ch, support.id, P.ViewChannel), n);
+      assert.ok(allows(ch, coowner.id, P.ViewChannel), n);
+      assert.ok(!ow(ch, VERIFIED) && !ow(ch, vipRole.id), n);
+    }
     // tickets category and transcripts stay private and now include the new support role
     const tcat = byName(g, '🎫 Tickets');
     assert.ok(denies(tcat, 'G', P.ViewChannel));
@@ -513,7 +553,7 @@ test('execute rebuilds the layout: new things exist, old ones are gone, kept thi
 
     // order: reminder first, kept category last
     const order = g.channels.positions.sort((a, b) => a.position - b.position).map((p) => g.channels.cache.get(p.channel).name);
-    assert.deepEqual(order, ['🌐 ıl 35xw.top', '🔒 ıl PRIVATE', '✅ ıl VERIFY', '🎫 Tickets', '🌍 ıl GENERAL', '🔊 ıl VOICE', 'osjetljivo']);
+    assert.deepEqual(order, ['🌐 ıl 35xw.top', '🔒 ıl PRIVATE', '✅ ıl VERIFY', '🎫 Tickets', '📌 ıl INFO', '🌍 ıl GENERAL', '🔊 ıl VOICE', '💎 ıl VIP', '🛡️ ıl STAFF', 'osjetljivo']);
     // role order: stack sits directly above the + role
     const asc = [...g.roles.cache.values()].filter((r) => r.id !== 'G').sort((a, b) => a.position - b.position).map((r) => r.name);
     const at = asc.indexOf('+');

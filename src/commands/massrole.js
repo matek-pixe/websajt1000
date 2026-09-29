@@ -98,7 +98,7 @@ module.exports = {
         lastEdit = Date.now();
         await interaction
           .editReply({
-            embeds: [card({ description: `${working}. ${num(changed + skipped + failed)} of ${num(targets.length)} done.`, footer: 'Roles' })],
+            embeds: [card({ description: `${working}. ${num(changed + skipped + failed)} of ${num(targets.length)} done.`, footer: 'roles' })],
           })
           .catch(() => {});
       }
@@ -115,7 +115,7 @@ module.exports = {
         ...(failures.length ? [field('First errors', lines(failures, { max: 5, limit: 1024 }))] : []),
       ],
       tone: failed > 0 ? 'warn' : 'ok',
-      footer: 'Roles',
+      footer: 'roles',
     });
 
     return interaction.editReply({ embeds: [embed] });

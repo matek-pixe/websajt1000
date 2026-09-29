@@ -39,9 +39,11 @@ function previewCard(plan) {
   ];
 
   const layout = plan.create;
+  const fresh = layout.categories.filter((c) => !c.managed);
+  const total = fresh.reduce((n, c) => n + c.channels.length, layout.top.length);
   const built = [
-    `Voice ${names(layout.top).join(', ')}`,
-    `Categories ${names(layout.categories.filter((c) => !c.managed)).join(', ')}`,
+    `${plural(total, 'channel')} in ${plural(fresh.length, 'category', 'categories')}, plus ${names(layout.top).join(', ')} at the top`,
+    `Categories ${names(fresh).join(', ')}`,
     r.create.length ? `New roles: ${r.create.map((x) => tick(x.name)).join(', ')}` : null,
     r.adopt.length ? `Renamed roles: ${r.adopt.map((x) => `${tick(x.name)} to ${tick(x.to)}`).join(', ')}` : null,
   ].filter(Boolean);

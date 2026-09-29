@@ -44,7 +44,7 @@ module.exports = {
         description = 'The saved role no longer exists. Run /aa with a new role to replace it.';
         tone = 'warn';
       }
-      return ephemeral(interaction, { embeds: [card({ title: 'Auto role', description, tone, footer: 'Roles' })] });
+      return ephemeral(interaction, { embeds: [card({ title: 'Auto role', description, tone, footer: 'roles' })] });
     }
 
     // Validate the chosen role.
@@ -80,7 +80,7 @@ module.exports = {
           description: `Every new member on this server now gets ${mention.role(role.id)}.`,
           fields,
           tone: assignable ? 'ok' : 'warn',
-          footer: 'Roles',
+          footer: 'roles',
         }),
       ],
     });

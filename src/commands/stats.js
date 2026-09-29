@@ -42,7 +42,7 @@ module.exports = {
         field('FiveM given', num(fivem.given), true),
         field('Top for /steam', renderLeaderboard(steam.top)),
         field('Top for /5m', renderLeaderboard(fivem.top)),
-        field('In the pool', `Steam **${num(steam.available)}**\nFiveM **${num(fivem.available)}**`),
+        field('In stock', `Steam **${num(steam.available)}**\nFiveM **${num(fivem.available)}**`),
       ],
       footer: 'stats',
       timestamp: true,

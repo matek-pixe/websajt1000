@@ -89,7 +89,7 @@ module.exports = {
       description: `${who}\n${inServer ? 'In the server.' : 'Not in the server.'}`,
       fields,
       tone,
-      footer: 'Roles',
+      footer: 'roles',
     });
 
     await ephemeral(interaction, { embeds: [embed] });

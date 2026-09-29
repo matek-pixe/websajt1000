@@ -138,8 +138,11 @@ deleted, so a channel created after the preview survives.
 | `🔒 ıl PRIVATE` | `🔒 ıl PRIV-CHAT`, `🔒 ıl PRIV` (voice) | the server owner and the priv role; admins always see it |
 | `✅ ıl VERIFY` | `🎫 ıl VERIFY` with the **35xw verification** panel | everyone can read it and press the button; **hidden from verified members** |
 | `🎫 Tickets` | ticket channels and `#transcripts` | staff and admins; each ticket also shows to its opener |
-| `🌍 ıl GENERAL` | `💬 ıl CHAT`, `🤖 ıl CMDS`, `📢 ıl SERVER`, `🗑️ ıl DUMP` | verified members |
-| `🔊 ıl VOICE` | `🔊 ıl VOICE #1`, `#2`, `#3` | verified members |
+| `📌 ıl INFO` | `📜 ıl RULES`, `📢 ıl ANNOUNCEMENTS`, `🛠️ ıl CHANGELOG`, `ℹ️ ıl INFORMATION` | verified members, read only; staff can post |
+| `🌍 ıl GENERAL` | `💬 ıl CHAT`, `🌍 ıl BALKAN`, `🤖 ıl CMDS`, `🎮 ıl GEN`, `📢 ıl SERVER`, `🗑️ ıl DUMP` | verified members |
+| `🔊 ıl VOICE` | `#1`, `#2`, `#3`, `🌍 ıl BALKAN`, `💤 ıl AFK` | verified members |
+| `💎 ıl VIP` | `💎 ıl VIP-CHAT`, `💎 ıl VIP VOICE` | the VIP role and staff |
+| `🛡️ ıl STAFF` | `📣 ıl STAFF-NEWS`, `💬 ıl STAFF-CHAT`, `🚩 ıl REPORTS`, `📋 ıl LOGS`, `🛡️ ıl STAFF VOICE` | the support role and the co-owner role |
 | last | `osjetljivo` | unchanged |
 
 **Roles.** The verified role is, in this order: the one chosen with `verified`, the id in
