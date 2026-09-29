@@ -124,7 +124,8 @@ deleted, so a channel created after the preview survives.
 - The `osjetljivo` category with everything inside it, exactly as it is (name and permissions are
   never edited). Add more with the `keep` option or `SETUP_KEEP_CATEGORIES`. If no such category
   exists, the command refuses to run.
-- The tickets category with open tickets and `#transcripts`, so ticket history is never lost.
+- The tickets category with open tickets and `#transcripts`, so ticket history is never lost. The
+  ticket system needs it, so it is created when it does not exist yet.
 - The `+` role (matched by its exact name) and the verified role, the role that gives access to
   `osjetljivo`, the website roles (`WEB_ROLE_ID`), the auto role, every role with Administrator,
   managed roles and roles above the bot. Extra ids go in `SETUP_PROTECTED_ROLE_IDS`.
@@ -135,11 +136,11 @@ deleted, so a channel created after the preview survives.
 | Where | What | Who sees it |
 | --- | --- | --- |
 | top | `🌐 ıl 35xw.top` (voice) | everyone, nobody can join, a reminder of the website |
-| `🔒 ıl PRIVATE` | `🔒 ıl PRIV-CHAT`, `🔒 ıl PRIV` (voice) | the server owner and the priv role; admins always see it |
+| `🔒 ıl PRIVATE` | `🔒 ıl PRIV-CHAT`, `🔒 ıl PRIV` (voice) | the server owner, admin roles, every role above the lowest admin role, and the co-owner role |
 | `✅ ıl VERIFY` | `🎫 ıl VERIFY` with the **35xw verification** panel | everyone can read it and press the button; **hidden from verified members** |
 | `🎫 Tickets` | ticket channels and `#transcripts` | staff and admins; each ticket also shows to its opener |
-| `📌 ıl INFO` | `📜 ıl RULES`, `📢 ıl ANNOUNCEMENTS`, `🛠️ ıl CHANGELOG`, `ℹ️ ıl INFORMATION` | verified members, read only; staff can post |
-| `🌍 ıl GENERAL` | `💬 ıl CHAT`, `🌍 ıl BALKAN`, `🤖 ıl CMDS`, `🎮 ıl GEN`, `📢 ıl SERVER`, `🗑️ ıl DUMP` | verified members |
+| `📌 ıl INFO` | `📜 ıl RULES`, `📢 ıl ANNOUNCEMENTS`, `🛠️ ıl CHANGELOG`, `ℹ️ ıl INFORMATION`, `🛒 ıl BUY-TRIGGERS`, `🆗 ıl JOINS` | verified members only, read only; staff can post |
+| `🌍 ıl GENERAL` | `💬 ıl CHAT`, `🌍 ıl BALKAN`, `🤖 ıl CMDS`, `🎮 ıl GEN`, `♾️ ıl TRIGGERS`, `📢 ıl SERVER`, `🗑️ ıl DUMP` | verified members |
 | `🔊 ıl VOICE` | `#1`, `#2`, `#3`, `🌍 ıl BALKAN`, `💤 ıl AFK` | verified members |
 | `💎 ıl VIP` | `💎 ıl VIP-CHAT`, `💎 ıl VIP VOICE` | the VIP role and staff |
 | `🛡️ ıl STAFF` | `📣 ıl STAFF-NEWS`, `💬 ıl STAFF-CHAT`, `🚩 ıl REPORTS`, `📋 ıl LOGS`, `🛡️ ıl STAFF VOICE` | the support role and the co-owner role |
@@ -151,9 +152,12 @@ deleted, so a channel created after the preview survives.
 place, so members keep them: `👑 ıl CO-OWNER`, `🎫 ıl SUPPORT` (this becomes the ticket staff role),
 `💎 ıl VIP`, `🤝 ıl FRIEND` and an invisible-named separator role that is not shown apart from
 members. Anything missing is created. They are stacked directly above the verified role. Priv access
-goes to the `priv_role` you pass, otherwise to `👑 ıl CO-OWNER`.
+goes to the server owner, every role with Administrator, every role positioned above the lowest
+admin role and `👑 ıl CO-OWNER`, plus the `priv_role` you pass. The verified role, the `+` role, the
+auto role and the website roles are never given priv access, however high they sit. The preview
+lists exactly which roles qualify, and those roles are never deleted.
 
-**Options:** `verified`, `priv_role`, `keep` (an extra category to keep) and `delete_roles`
+**Options:** `verified`, `priv_role` (an extra role for the priv channels), `keep` (an extra category to keep) and `delete_roles`
 (`false` leaves every role alone).
 
 The bot needs **Administrator** (or Manage Channels and Manage Roles) and its role must sit above

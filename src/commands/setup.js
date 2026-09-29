@@ -44,14 +44,16 @@ function previewCard(plan) {
   const built = [
     `${plural(total, 'channel')} in ${plural(fresh.length, 'category', 'categories')}, plus ${names(layout.top).join(', ')} at the top`,
     `Categories ${names(fresh).join(', ')}`,
+    plan.ticketCategory ? null : 'Category `🎫 Tickets` with `transcripts`, which the ticket system needs',
     r.create.length ? `New roles: ${r.create.map((x) => tick(x.name)).join(', ')}` : null,
     r.adopt.length ? `Renamed roles: ${r.adopt.map((x) => `${tick(x.name)} to ${tick(x.to)}`).join(', ')}` : null,
   ].filter(Boolean);
 
-  const priv = plan.opts.privId ? mention.role(plan.opts.privId) : 'the co-owner role';
+  const admins = plan.priv.filter((x) => x.why === 'admin role');
+  const above = plan.priv.filter((x) => x.why !== 'admin role');
   const access = [
     `Verified members: ${plan.verified.id ? mention.role(plan.verified.id) : 'a new verified role'} (${plan.verified.source})`,
-    `Priv channels: admins, the server owner and ${priv}`,
+    `Priv channels: the server owner, ${admins.length ? `admin roles ${joinList(admins.map((x) => mention.role(x.id)), { max: 6 })}` : 'no admin roles found'}, ${above.length ? `the roles above them ${joinList(above.map((x) => mention.role(x.id)), { max: 6 })}, ` : ''}and the co-owner role`,
   ];
 
   const fields = [

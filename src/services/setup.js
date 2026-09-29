@@ -86,6 +86,8 @@ function buildLayout(siteName) {
           text('announcements', '📢', 'ANNOUNCEMENTS', 'info', 'News and announcements.'),
           text('changelog', '🛠️', 'CHANGELOG', 'info', 'What changed and when.'),
           text('information', 'ℹ️', 'INFORMATION', 'info', 'How everything here works.'),
+          text('buy_triggers', '🛒', 'BUY-TRIGGERS', 'info', 'What is for sale and how to buy it.'),
+          text('joins', '🆗', 'JOINS', 'info', 'Who joined.'),
         ],
       },
       {
@@ -97,6 +99,7 @@ function buildLayout(siteName) {
           text('balkan', '🌍', 'BALKAN', 'members', 'Chat in your own language.'),
           text('cmds', '🤖', 'CMDS', 'members', 'Bot commands go here.'),
           text('gen', '🎮', 'GEN', 'members', 'Use /steam, /5m and /combo here.'),
+          text('triggers', '♾️', 'TRIGGERS', 'members', 'Triggers and scripts.'),
           text('server', '📢', 'SERVER', 'members', 'News and info about the server.'),
           text('dump', '🗑️', 'DUMP', 'members', 'Anything goes. Media, links, random.'),
         ],
@@ -150,7 +153,7 @@ const NO_JOIN = [P.Connect, P.Speak];
  *  info      like members, but verified members can only read
  *  vip       the VIP role and staff only
  *  staff     the support role and the co-owner role only
- *  private   the server owner and the priv role only
+ *  private   the server owner, admins, the roles above them and the co-owner role
  *  reminder  visible to everyone, nobody can join
  */
 function permsFor(kind, ids, held) {
@@ -191,7 +194,7 @@ function permsFor(kind, ids, held) {
       break;
     case 'private':
       rows.push(role(ids.everyone, undefined, H([P.ViewChannel, P.Connect])));
-      if (ids.priv) rows.push(role(ids.priv, H(FULL)));
+      for (const id of ids.privRoles || []) rows.push(role(id, H(FULL)));
       if (ids.owner) rows.push(member(ids.owner, H(FULL)));
       break;
     case 'reminder':
@@ -311,6 +314,28 @@ function planRoleOrder(roles, { botTop, everyoneId, anchorId, stack }) {
   ids.splice(at, 0, ...present);
   const byId = new Map(below.map((r) => [r.id, r]));
   return ids.map((id, i) => ({ role: id, position: i + 1 })).filter((e) => byId.get(e.role).position !== e.position);
+}
+
+/**
+ * Who may enter the private channels besides the server owner: every role with Administrator,
+ * every role positioned above the lowest of them, and roles named explicitly. Roles that only
+ * mark ordinary members are never included, however high they sit: the verified role, the +
+ * role, the auto role, website roles and the template's member tiers (`exclude`).
+ */
+function computePrivRoles(roles, { everyoneId, exclude = new Set(), autoRoleNames = [], extraIds = new Set() }) {
+  const usable = roles.filter((r) => r.id !== everyoneId && !r.managed).sort((a, b) => b.position - a.position);
+  const isAdmin = (r) => !!(r.permissions && typeof r.permissions.has === 'function' && r.permissions.has(P.Administrator));
+  const admins = usable.filter(isAdmin);
+  const floor = admins.length ? Math.min(...admins.map((r) => r.position)) : null;
+  const out = [];
+  for (const r of usable) {
+    // Member-marking roles are never listed, even when they happen to carry Administrator.
+    if (exclude.has(r.id) || isPlusRole(r) || autoRoleNames.includes(normalizeName(r.name))) continue;
+    if (isAdmin(r)) out.push({ id: r.id, name: r.name, why: 'admin role' });
+    else if (extraIds.has(r.id)) out.push({ id: r.id, name: r.name, why: 'chosen in the command' });
+    else if (floor !== null && r.position > floor) out.push({ id: r.id, name: r.name, why: 'above the admin roles' });
+  }
+  return out;
 }
 
 const listOf = (v) =>
@@ -481,6 +506,22 @@ class SetupService {
       deleteRoles: opts.deleteRoles !== false,
     });
 
+    // Priv access: admins and everyone above them. Those roles are kept, never deleted.
+    const exclude = new Set([verified.role && verified.role.id, ...((this.config.web && this.config.web.roleIds) || [])].filter(Boolean));
+    for (const a of roles.adopt) if (a.key !== 'coowner') exclude.add(a.id);
+    const priv = computePrivRoles([...guild.roles.cache.values()], {
+      everyoneId: guild.id,
+      exclude,
+      autoRoleNames: autoNames,
+      extraIds: new Set([opts.priv && opts.priv.id].filter(Boolean)),
+    });
+    const privIds = new Set(priv.map((r) => r.id));
+    roles.remove = roles.remove.filter((r) => {
+      if (!privIds.has(r.id)) return true;
+      roles.kept.push({ id: r.id, name: r.name, reason: 'has priv access' });
+      return false;
+    });
+
     const warnings = [];
     if (verified.role && verified.role.position >= me.roles.highest.position) {
       warnings.push(`My role is not above ${verified.role.name}, so I cannot hand it out. Move my role higher.`);
@@ -503,6 +544,7 @@ class SetupService {
         remove: channels.remove.map((c) => ({ id: c.id, name: c.name, category: c.type === T.GuildCategory })),
         blocked: channels.blocked.map((c) => ({ id: c.id, name: c.name })),
         roles,
+        priv,
         create: buildLayout(this.config.setup.siteName),
         warnings,
       },
@@ -569,7 +611,7 @@ class SetupService {
         support: R.support ? R.support.id : null,
         vip: R.vip ? R.vip.id : null,
         coowner: R.coowner ? R.coowner.id : null,
-        priv: plan.opts.privId || (R.coowner ? R.coowner.id : null),
+        privRoles: [...new Set([...plan.priv.map((r) => r.id).filter((id) => guild.roles.cache.has(id)), R.coowner ? R.coowner.id : null].filter(Boolean))],
       };
       if (R.support) this.tickets.setStaffRole(guild.id, R.support.id);
 
@@ -667,8 +709,6 @@ class SetupService {
         report.created.push(`role ${spec.name}`);
       }
     }
-    if (plan.opts.privId && cache.has(plan.opts.privId)) R.priv = cache.get(plan.opts.privId);
-    else if (R.coowner) R.priv = R.coowner;
     return R;
   }
 
@@ -802,6 +842,7 @@ module.exports = {
   hasOpenButton,
   classifyChannels,
   classifyRoles,
+  computePrivRoles,
   planRoleOrder,
   listOf,
 };

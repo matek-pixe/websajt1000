@@ -19,6 +19,7 @@ const {
   hasOpenButton,
   classifyChannels,
   classifyRoles,
+  computePrivRoles,
   planRoleOrder,
 } = require('../src/services/setup');
 const { tmpDir, rm } = require('./helpers');
@@ -235,7 +236,7 @@ test('name helpers ignore decoration and recognise the + role', () => {
 });
 
 test('permsFor: explicit overwrite types, verified hidden from verify, priv limited, filtered to held perms', () => {
-  const ids = { everyone: 'G', bot: 'BOT', verified: 'V', support: 'S', priv: 'PR', owner: 'OWNER', manager: null };
+  const ids = { everyone: 'G', bot: 'BOT', verified: 'V', support: 'S', privRoles: ['PR', 'PR2'], owner: 'OWNER', manager: null };
   const all = (f) => f;
   const get = (rows, id) => rows.find((r) => r.id === id);
 
@@ -250,6 +251,7 @@ test('permsFor: explicit overwrite types, verified hidden from verify, priv limi
   const priv = permsFor('private', ids, all);
   assert.ok(get(priv, 'G').deny.includes(P.ViewChannel));
   assert.ok(get(priv, 'PR').allow.includes(P.Connect));
+  assert.ok(get(priv, 'PR2').allow.includes(P.ViewChannel));
   assert.equal(get(priv, 'OWNER').type, OverwriteType.Member);
   assert.equal(get(priv, 'V'), undefined);
 
@@ -330,6 +332,39 @@ test('classifyRoles: protects +, ids, admin and managed roles; reuses template r
   assert.ok(off.kept.some((k) => k.name === 'Muted' && k.reason === 'left alone'));
   const need = classifyRoles(roles, { botTop: 50, everyoneId: 'G', protectedIds: new Map(), needVerified: true });
   assert.ok(need.create.some((c) => c.key === 'verified'));
+});
+
+test('computePrivRoles: admins, everything above the lowest admin role, never ordinary member roles', () => {
+  const mk = (id, name, position, extra = {}) => ({ id, name, position, managed: false, permissions: perm(), ...extra });
+  const roles = [
+    mk('G', '@everyone', 0),
+    mk('MEM', 'Member', 2),
+    mk('PLUS', '+', 11),
+    mk('VER', 'Verified', 12),
+    mk('MOD', 'Moderator', 10, { permissions: perm(P.Administrator) }),
+    mk('DEC', 'Founder label', 15),
+    mk('OWN', 'Owner', 30, { permissions: perm(P.Administrator) }),
+    mk('BOT', 'a bot', 40, { managed: true }),
+    mk('WEB', 'Website', 41),
+    mk('LOW', 'Helper', 5),
+    mk('X', 'Extra', 4),
+  ];
+  const out = computePrivRoles(roles, { everyoneId: 'G', exclude: new Set(['VER', 'WEB']), autoRoleNames: ['member'], extraIds: new Set(['X']) });
+  assert.deepEqual(out.map((r) => [r.id, r.why]), [
+    ['OWN', 'admin role'],
+    ['DEC', 'above the admin roles'],
+    ['MOD', 'admin role'],
+    ['X', 'chosen in the command'],
+  ]);
+  // member-marking roles are skipped even when they carry Administrator
+  const odd = computePrivRoles(
+    [mk('G', '@everyone', 0), mk('PLUS', '+', 3, { permissions: perm(P.Administrator) }), mk('VER', 'Verified', 4, { permissions: perm(P.Administrator) }), mk('A', 'Admin', 5, { permissions: perm(P.Administrator) })],
+    { everyoneId: 'G', exclude: new Set(['VER']), extraIds: new Set() },
+  );
+  assert.deepEqual(odd.map((r) => r.id), ['A']);
+  // no admin role anywhere: nobody qualifies by position
+  const none = computePrivRoles(roles.map((r) => ({ ...r, permissions: perm() })), { everyoneId: 'G', exclude: new Set(), extraIds: new Set() });
+  assert.deepEqual(none, []);
 });
 
 test('planRoleOrder stacks the template roles above the anchor and only returns changes', () => {
@@ -480,8 +515,8 @@ test('execute rebuilds the layout: new things exist, old ones are gone, kept thi
     const kids = (c) => [...g.channels.cache.values()].filter((x) => x.parentId === c.id).map((x) => x.name);
     assert.deepEqual(kids(cat('🔒 ıl PRIVATE')), ['🔒 ıl PRIV-CHAT', '🔒 ıl PRIV']);
     assert.deepEqual(kids(cat('✅ ıl VERIFY')), ['🎫 ıl VERIFY']);
-    assert.deepEqual(kids(cat('📌 ıl INFO')), ['📜 ıl RULES', '📢 ıl ANNOUNCEMENTS', '🛠️ ıl CHANGELOG', 'ℹ️ ıl INFORMATION']);
-    assert.deepEqual(kids(cat('🌍 ıl GENERAL')), ['💬 ıl CHAT', '🌍 ıl BALKAN', '🤖 ıl CMDS', '🎮 ıl GEN', '📢 ıl SERVER', '🗑️ ıl DUMP']);
+    assert.deepEqual(kids(cat('📌 ıl INFO')), ['📜 ıl RULES', '📢 ıl ANNOUNCEMENTS', '🛠️ ıl CHANGELOG', 'ℹ️ ıl INFORMATION', '🛒 ıl BUY-TRIGGERS', '🆗 ıl JOINS']);
+    assert.deepEqual(kids(cat('🌍 ıl GENERAL')), ['💬 ıl CHAT', '🌍 ıl BALKAN', '🤖 ıl CMDS', '🎮 ıl GEN', '♾️ ıl TRIGGERS', '📢 ıl SERVER', '🗑️ ıl DUMP']);
     assert.deepEqual(kids(cat('🔊 ıl VOICE')), ['🔊 ıl VOICE #1', '🔊 ıl VOICE #2', '🔊 ıl VOICE #3', '🌍 ıl BALKAN', '💤 ıl AFK']);
     assert.deepEqual(kids(cat('💎 ıl VIP')), ['💎 ıl VIP-CHAT', '💎 ıl VIP VOICE']);
     assert.deepEqual(kids(cat('🛡️ ıl STAFF')), ['📣 ıl STAFF-NEWS', '💬 ıl STAFF-CHAT', '🚩 ıl REPORTS', '📋 ıl LOGS', '🛡️ ıl STAFF VOICE']);
@@ -512,12 +547,15 @@ test('execute rebuilds the layout: new things exist, old ones are gone, kept thi
     for (const n of ['🔒 ıl PRIVATE', '🔒 ıl PRIV', '🔒 ıl PRIV-CHAT']) {
       const ch = byName(g, n);
       assert.ok(denies(ch, 'G', P.ViewChannel), n);
-      assert.ok(allows(ch, coowner.id, P.ViewChannel), n);
       assert.ok(allows(ch, 'OWNER', P.ViewChannel), n);
-      assert.ok(!ow(ch, VERIFIED), n);
+      assert.ok(allows(ch, coowner.id, P.ViewChannel), n);
+      // admins and every role above the lowest admin role
+      for (const id of [SENSITIVE, 'MOD', 'ABOVE']) assert.ok(allows(ch, id, P.ViewChannel), `${n} ${id}`);
+      // ordinary member roles never, however the hierarchy looks
+      for (const id of [VERIFIED, 'VIP', 'FRIENDS', 'MEMBER', 'MUTED', 'OLDSTAFF']) assert.ok(!ow(ch, id), `${n} ${id}`);
     }
     // info is read-only for verified members, staff can post
-    for (const n of ['📌 ıl INFO', '📜 ıl RULES', 'ℹ️ ıl INFORMATION']) {
+    for (const n of ['📌 ıl INFO', '📜 ıl RULES', 'ℹ️ ıl INFORMATION', '🛒 ıl BUY-TRIGGERS', '🆗 ıl JOINS']) {
       const ch = byName(g, n);
       assert.ok(denies(ch, 'G', P.ViewChannel), n);
       assert.ok(allows(ch, VERIFIED, P.ViewChannel), n);
@@ -598,8 +636,9 @@ test('delete_roles false leaves every role alone, and the priv role option contr
     assert.ok(g.log.every((l) => l[0] !== 'role.delete'));
     assert.ok(g.roles.cache.get('OLDSTAFF')); // chosen for priv, so protected as well
     const priv = byName(g, '🔒 ıl PRIV');
-    assert.ok(allows(priv, 'OLDSTAFF', P.ViewChannel));
-    assert.ok(!ow(priv, roleByName(g, '👑 ıl CO-OWNER').id));
+    assert.ok(allows(priv, 'OLDSTAFF', P.ViewChannel)); // the extra role
+    assert.ok(allows(priv, roleByName(g, '👑 ıl CO-OWNER').id, P.ViewChannel)); // always
+    assert.ok(allows(priv, SENSITIVE, P.ViewChannel)); // admins as well
   } finally {
     rm(dir);
   }
@@ -1077,6 +1116,21 @@ test('property: on random servers nothing protected is lost and only previewed t
       if (!deleteRoles) assert.deepEqual(g.deleted.roles, [], `seed ${seed}: delete_roles false deletes no roles`);
       if (rules) assert.ok(g.channels.cache.has(rules), `seed ${seed}: the rules channel is still there`);
       assert.ok(byName(g, '🎫 ıl VERIFY'), `seed ${seed}: the new layout exists`);
+      // the private channels are never opened to ordinary members
+      const privCh = byName(g, '🔒 ıl PRIV');
+      const adminFloor = Math.min(...roles.filter((x) => x.admin && !x.managed).map((x) => x.position), Infinity);
+      const coRole = [...g.roles.cache.values()].find((x) => normalizeName(x.name) === 'coowner' && x.name.includes('ıl'));
+      for (const [id] of privCh.permissionOverwrites.cache) {
+        if (['G', 'BOT', 'OWNER'].includes(id)) continue;
+        const rr = g.roles.cache.get(id);
+        assert.ok(rr, `seed ${seed}: overwrite ${id} points at a role that exists`);
+        assert.notEqual(id, VERIFIED, `seed ${seed}: the verified role must never reach the priv channel`);
+        assert.notEqual(id, 'MEMBER', `seed ${seed}: the auto role must never reach the priv channel`);
+        assert.notEqual(rr.name.trim(), '+', `seed ${seed}: the + role must never reach the priv channel`);
+        const before = roles.find((x) => x.id === id); // positions change while the roles are reordered, so judge by the originals
+        const ok = (coRole && coRole.id === id) || (before && (before.admin || before.position > adminFloor));
+        assert.ok(ok, `seed ${seed}: ${rr.name} has no reason to reach the priv channel`);
+      }
       assert.equal(setup.isRunning('G'), false);
     }
     assert.ok(rebuilt > 100 && refused > 5 && rolledBack > 5, `the generator should cover every branch (rebuilt ${rebuilt}, refused ${refused}, rolled back ${rolledBack})`);
