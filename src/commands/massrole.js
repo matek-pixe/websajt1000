@@ -27,6 +27,7 @@ function needsChange(member, roleId, action) {
  */
 module.exports = {
   managerOnly: false,
+  audit: true, // leaves a line in the server log
   data: new SlashCommandBuilder()
     .setName('f')
     .setDescription('Give or remove a role for every member (admins only)')
@@ -79,32 +80,51 @@ module.exports = {
     let failed = 0;
     const failures = [];
     let lastEdit = Date.now();
+    // One line in the server log instead of one per member.
+    const release = ctx.logs ? ctx.logs.hold(guild.id) : () => {};
 
-    for (const member of targets) {
-      if (!needsChange(member, role.id, action)) {
-        skipped += 1;
-        continue;
+    try {
+      for (const member of targets) {
+        if (!needsChange(member, role.id, action)) {
+          skipped += 1;
+          continue;
+        }
+        try {
+          if (action === 'remove') await member.roles.remove(role.id, `/f by ${interaction.user.tag}`);
+          else await member.roles.add(role.id, `/f by ${interaction.user.tag}`);
+          changed += 1;
+        } catch (err) {
+          failed += 1;
+          if (failures.length < 5) failures.push(`${member.user ? member.user.tag : member.id}: ${err.message}`);
+        }
+        // Keep the admin posted on big servers (Discord rate-limits role changes).
+        if (Date.now() - lastEdit > 3000) {
+          lastEdit = Date.now();
+          await interaction
+            .editReply({
+              embeds: [card({ description: `${working}. ${num(changed + skipped + failed)} of ${num(targets.length)} done.`, footer: 'roles' })],
+            })
+            .catch(() => {});
+        }
       }
-      try {
-        if (action === 'remove') await member.roles.remove(role.id, `/f by ${interaction.user.tag}`);
-        else await member.roles.add(role.id, `/f by ${interaction.user.tag}`);
-        changed += 1;
-      } catch (err) {
-        failed += 1;
-        if (failures.length < 5) failures.push(`${member.user ? member.user.tag : member.id}: ${err.message}`);
-      }
-      // Keep the admin posted on big servers (Discord rate-limits role changes).
-      if (Date.now() - lastEdit > 3000) {
-        lastEdit = Date.now();
-        await interaction
-          .editReply({
-            embeds: [card({ description: `${working}. ${num(changed + skipped + failed)} of ${num(targets.length)} done.`, footer: 'roles' })],
-          })
-          .catch(() => {});
-      }
+
+    } finally {
+      release();
     }
 
     const removing = action === 'remove';
+    if (ctx.logs) {
+      ctx.logs.post(
+        guild,
+        card({
+          title: removing ? 'Role removed from everyone' : 'Role given to everyone',
+          fields: [field('Role', mention.role(role.id), true), field('By', `${mention.user(interaction.user.id)} \`${interaction.user.id}\``, true), field(removing ? 'Removed' : 'Given', num(changed), true), field('Failed', num(failed), true)],
+          tone: 'warn',
+          footer: 'logs',
+          timestamp: true,
+        }),
+      );
+    }
     const embed = card({
       title: removing ? 'Role removed from everyone' : 'Role given to everyone',
       description: `Checked ${num(targets.length)} ${targets.length === 1 ? 'member' : 'members'} for ${mention.role(role.id)}. Bots ${bots ? 'included' : 'skipped'}.`,

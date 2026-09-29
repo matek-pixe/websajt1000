@@ -136,15 +136,36 @@ deleted, so a channel created after the preview survives.
 | Where | What | Who sees it |
 | --- | --- | --- |
 | top | `🌐 ıl 35xw.top` (voice) | everyone, nobody can join, a reminder of the website |
-| `🔒 ıl PRIVATE` | `🔒 ıl PRIV-CHAT`, `🔒 ıl PRIV` (voice) | the server owner, admin roles, every role above the lowest admin role, and the co-owner role |
-| `✅ ıl VERIFY` | `🎫 ıl VERIFY` with the **35xw verification** panel | everyone can read it and press the button; **hidden from verified members** |
+| `🔒 ıl PRIVATE` | `🔒・priv-chat`, `🔒 ıl PRIV` (voice) | the server owner, admin roles, every role above the lowest admin role, and the co-owner role |
+| `✅ ıl VERIFY` | `🎫・verify` with the **35xw verification** panel | everyone can read it and press the button; **hidden from verified members** |
 | `🎫 Tickets` | ticket channels and `#transcripts` | staff and admins; each ticket also shows to its opener |
-| `📌 ıl INFO` | `📜 ıl RULES`, `📢 ıl ANNOUNCEMENTS`, `🛠️ ıl CHANGELOG`, `ℹ️ ıl INFORMATION`, `🛒 ıl BUY-TRIGGERS`, `🆗 ıl JOINS` | verified members only, read only; staff can post |
-| `🌍 ıl GENERAL` | `💬 ıl CHAT`, `🌍 ıl BALKAN`, `🤖 ıl CMDS`, `🎮 ıl GEN`, `♾️ ıl TRIGGERS`, `📢 ıl SERVER`, `🗑️ ıl DUMP` | verified members |
+| `📌 ıl INFO` | `📜・rules`, `📢・announcements`, `🛠️・changelog`, `ℹ️・information`, `🛒・buy-triggers`, `🆗・joins` | verified members only, read only; staff can post |
+| `🌍 ıl GENERAL` | `💬・chat`, `🌍・balkan`, `🤖・cmds`, `🎮・gen`, `♾️・triggers`, `📢・server`, `🗑️・dump` | verified members |
 | `🔊 ıl VOICE` | `#1`, `#2`, `#3`, `🌍 ıl BALKAN`, `💤 ıl AFK` | verified members |
-| `💎 ıl VIP` | `💎 ıl VIP-CHAT`, `💎 ıl VIP VOICE` | the VIP role and staff |
-| `🛡️ ıl STAFF` | `📣 ıl STAFF-NEWS`, `💬 ıl STAFF-CHAT`, `🚩 ıl REPORTS`, `📋 ıl LOGS`, `🛡️ ıl STAFF VOICE` | the support role and the co-owner role |
+| `💎 ıl VIP` | `💎・vip-chat`, `💎 ıl VIP VOICE` | the VIP role and staff |
+| `🛡️ ıl STAFF` | `📣・staff-news`, `💬・staff-chat`, `🚩・reports`, `📋・logs`, `🛡️ ıl STAFF VOICE` | the support role and the co-owner role |
 | last | `osjetljivo` | unchanged |
+
+Text channels use `・` in their names and are lowercase, because Discord lowercases text channel
+names and turns spaces into hyphens. Categories and voice channels keep the `icon ıl NAME` style.
+
+**Also protected, found by the review of this command:** roles that appear in the permission
+overwrites of a kept channel (deleting a role removes its overwrites, which would edit the kept
+category), the current ticket staff role when it has Administrator, and the server log channel,
+wherever it sits. The tickets category and `#transcripts` are looked up with one rule for both the
+preview and the run, and `#transcripts` is only ever taken from inside the tickets category.
+
+**What else it takes care of.** Invites belong to a channel and die with it, so the preview warns how
+many will stop working and the run creates one new permanent invite in the verify channel and prints
+it in the summary. If the AFK channel or the system messages channel were among the deleted ones,
+they are pointed at the new AFK voice channel and the new chat.
+
+**If something goes wrong.** Roles are set up first. If a role cannot be created, or building fails,
+everything the run created is removed again, renamed roles get their name back and nothing old is
+deleted, and the card lists anything it could not undo. Once the old layout is being removed, an
+error is reported as a partial rebuild. A second preview that is still open after a rebuild is
+refused. The result is shown in the reply, else sent as a direct message, else posted in the new
+priv chat.
 
 **Roles.** The verified role is, in this order: the one chosen with `verified`, the id in
 `SETUP_VERIFIED_ROLE_ID`, the role named `+`, the one from the last run, otherwise a new
@@ -163,6 +184,28 @@ lists exactly which roles qualify, and those roles are never deleted.
 The bot needs **Administrator** (or Manage Channels and Manage Roles) and its role must sit above
 the roles it renames, deletes and reorders. If the channel the command ran in is deleted, the
 summary is sent to the owner as a direct message.
+
+### Server log
+
+Everything that happens on the server is written to one private channel (`LOG_CHANNEL_ID`, default
+`1554450772605935626`): deleted messages, deleted or changed channels and roles, permission changes,
+bans, kicks, unbans, timeouts, nickname and role changes, joins, leaves, voice activity, created
+invites and webhooks, server changes and the bot's own admin commands.
+
+- **Who deleted a message and whose it was.** The message events give the author, the channel and
+  the time. The audit log gives who deleted it. Deleting your own message leaves no audit entry, so
+  that case reads "The author, no audit log entry". Messages the bot never saw in its cache still
+  show who deleted them when Discord recorded it.
+- **Message text** is only logged with `LOG_MESSAGE_CONTENT=true`, and that needs the **Message
+  Content Intent** switched on in the Developer Portal (Bot page). Without it the bot logs everything
+  else and says "Not logged" for the text. Turning the flag on before the intent makes Discord refuse
+  the login, so switch the intent on first.
+- **Quiet while it works.** `/setup server`, `/n` and `/f` would create hundreds of lines, so the log
+  is muted for the guild while they run and gets one summary line instead.
+- **Ticket channels** created and deleted by the bot are left out (the transcript covers them).
+- The bot needs to see and write in the channel and have **View Audit Log** (Administrator has it).
+  When the bot starts it posts "Logging is on" there, so you know it works.
+- `LOGS_ENABLED=false` turns it off, `LOG_VOICE=false` stops the voice lines.
 
 ### Website gated by a Discord role
 

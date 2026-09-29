@@ -83,6 +83,20 @@ const config = {
     confirmTtlMs: 10 * 60 * 1000,
   },
 
+  // Server log: one private channel that receives deleted messages (with who deleted them and
+  // whose they were), deleted or changed channels and roles, bans, kicks, joins, leaves and voice.
+  logs: {
+    enabled: !/^(0|false|no|off)$/i.test((env.LOGS_ENABLED || 'true').trim()),
+    channelId: (env.LOG_CHANNEL_ID || '1554450772605935626').trim(),
+    // Needs the Message Content Intent switched on in the Developer Portal, otherwise Discord refuses the login.
+    messageContent: /^(1|true|yes|on)$/i.test((env.LOG_MESSAGE_CONTENT || '').trim()),
+    voice: !/^(0|false|no|off)$/i.test((env.LOG_VOICE || 'true').trim()),
+    // Wait before asking the audit log who deleted a message; pause between posts; grace after a rebuild.
+    delayMs: 1500,
+    gapMs: 300,
+    graceMs: 15_000,
+  },
+
   // Role-gated website: visitors sign in with Discord and only get in if they hold a required role.
   web: {
     enabled: /^(1|true|yes|on)$/i.test((env.WEB_ENABLED || '').trim()),

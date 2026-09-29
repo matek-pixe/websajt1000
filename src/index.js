@@ -11,6 +11,8 @@ const { TicketService } = require('./services/tickets');
 const { BypassService } = require('./services/bypass');
 const { SetupService } = require('./services/setup');
 const { card, deny, COPY } = require('./ui');
+const { LogService } = require('./services/logs');
+const { refusal, isOwnerOrManager: ownerOrManager } = require('./gates');
 const { Cooldown } = require('./services/cooldown');
 const { createWebServer } = require('./web/server');
 const fs = require('node:fs');
@@ -59,9 +61,7 @@ function isManager(user) {
   return user && user.id === config.manager.id;
 }
 
-function isOwnerOrManager(interaction) {
-  return isManager(interaction.user) || !!(interaction.guild && interaction.guild.ownerId === interaction.user.id);
-}
+const isOwnerOrManager = (interaction) => ownerOrManager(interaction, isManager);
 
 /** Build the per-interaction context passed to command handlers. */
 function contextFor(interaction) {
@@ -166,9 +166,22 @@ async function startWeb(c) {
 
 // ---- client ----
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildModeration],
-  partials: [Partials.GuildMember, Partials.User],
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildModeration,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.GuildVoiceStates,
+    // Privileged: only asked for when LOG_MESSAGE_CONTENT is on, so the bot still logs in without it.
+    ...(config.logs.messageContent ? [GatewayIntentBits.MessageContent] : []),
+  ],
+  // Message: lets deletions of messages the bot never saw still reach the log.
+  partials: [Partials.GuildMember, Partials.User, Partials.Message],
 });
+
+const logs = new LogService(client, config.logs);
+services.logs = logs;
+logs.attach();
 
 client.once(Events.ClientReady, async (c) => {
   console.log(`[35xw] Logged in as ${c.user.tag} (${c.user.id})`);
@@ -196,6 +209,9 @@ client.once(Events.ClientReady, async (c) => {
       console.warn(`[35xw] ${guild.name}: ready sync failed: ${err.message}`);
     }
   }
+  let logged = 0;
+  for (const guild of c.guilds.cache.values()) if (logs.announce(guild)) logged += 1;
+  if (config.logs.enabled && !logged) console.warn(`[35xw] logs: channel ${config.logs.channelId} was not found on any server, so nothing is logged.`);
   console.log('[35xw] Ready.');
 
   // Website (optional) — never lets a web problem take the bot down.
@@ -232,25 +248,11 @@ async function handleCommand(interaction) {
 
   const ctx = contextFor(interaction);
 
-  // Verified-only commands must run on a server, where roles can be checked.
-  if ((!command.allowDM || command.requiresVerified) && !interaction.inGuild()) {
-    return deny(interaction, COPY.serverOnly);
-  }
-
-  if (command.managerOnly && !isManager(interaction.user)) {
-    return deny(interaction, COPY.managerOnly(interaction.commandName));
-  }
-
-  // Owner-only commands (/n, /setup): the server owner, plus the manager.
-  if (command.ownerOnly && !isOwnerOrManager(interaction)) {
-    return deny(interaction, COPY.ownerOnly(interaction.commandName));
-  }
-
-  // Commands "for everyone" are really for verified members: the role handed out after a ticket.
-  if (command.requiresVerified) {
-    const gate = setup.verifiedGate(interaction.guild, interaction.member, interaction.user, { isManager, isBypass: (u) => bypass.applies(u) });
-    if (!gate.ok) return deny(interaction, COPY.notVerified(gate));
-  }
+  const why = refusal(command, interaction, {
+    isManager,
+    verifiedGate: (i) => setup.verifiedGate(i.guild, i.member, i.user, { isManager, isBypass: (u) => bypass.applies(u) }),
+  });
+  if (why) return deny(interaction, why);
 
   // Commands flagged noCooldown skip the limit, and so does the manager while /b bypass is on.
   if (!bypass.skipsCooldown(command, interaction.user)) {
@@ -261,6 +263,9 @@ async function handleCommand(interaction) {
     // Spend the cooldown up front so a rapid double-invoke is blocked; commands refund on no-op/error.
     cooldown.hit(ctx.cooldownKey);
   }
+
+  // Admin commands leave a line in the server log.
+  if (command.managerOnly || command.ownerOnly || command.audit) logs.commandUsed(interaction);
 
   try {
     await command.execute(interaction, ctx);

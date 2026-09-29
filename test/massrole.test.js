@@ -167,3 +167,21 @@ test('/f refuses non-admins and un-assignable roles, and counts failures', async
   assert.equal(embed.fields.find((f) => f.name === 'Failed').value, '1');
   assert.ok(embed.fields.find((f) => f.name === 'First errors').value.includes('bad#0'));
 });
+
+test('/f mutes the server log while it runs and posts a single line afterwards', async () => {
+  const members = [fakeMember('a'), fakeMember('b'), fakeMember('c')];
+  const guild = fakeGuild(members);
+  guild.id = 'G';
+  const admin = fakeMember('ADM', { perms: [PermissionFlagsBits.Administrator] });
+  const i = fakeInteraction({ user: 'ADM', member: admin, guild, role: ROLE });
+  const calls = [];
+  const logs = {
+    hold: (id) => {
+      calls.push(['hold', id]);
+      return () => calls.push(['release', id]);
+    },
+    post: (g, embed) => calls.push(['post', embed.toJSON().title, embed.toJSON().fields.find((f) => f.name === 'Given').value]),
+  };
+  await massrole.execute(i, { ...ctxFor(), logs });
+  assert.deepEqual(calls, [['hold', 'G'], ['release', 'G'], ['post', 'Role given to everyone', '3']]);
+});

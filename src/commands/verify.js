@@ -13,6 +13,7 @@ const ALREADY_CLOSING = 'This ticket is already being closed.';
  */
 module.exports = {
   managerOnly: false,
+  audit: true, // leaves a line in the server log
   buttonPrefix: 'tk:',
   data: new SlashCommandBuilder()
     .setName('v')

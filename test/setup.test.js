@@ -860,7 +860,7 @@ test('pending confirmations are single use, bound to the user and the server, an
 });
 
 /** A fake interaction plus ctx for the /setup command. */
-function mkInteraction(g, setup, { userId = 'OWNER', customId = null, sub = 'server', options = {}, editFails = false, dmFails = false } = {}) {
+function mkInteraction(g, setup, { userId = 'OWNER', customId = null, sub = 'server', options = {}, editFails = false, dmFails = false, logs = null } = {}) {
   const st = { replies: [], edits: [], updates: [], dms: [], deferred: null };
   const it = {
     user: {
@@ -904,6 +904,7 @@ function mkInteraction(g, setup, { userId = 'OWNER', customId = null, sub = 'ser
   };
   const ctx = {
     setup,
+    logs,
     isManager: (u) => u.id === 'MGR',
     isOwnerOrManager: () => userId === 'OWNER' || userId === 'MGR',
   };
@@ -1677,5 +1678,61 @@ test('the layout survives Discord renaming rules and the co-owner sees what staf
   const ids = { everyone: 'G', bot: 'BOT', verified: 'V', support: 'S', coowner: 'CO', vip: 'VIP', privRoles: [], owner: null, manager: null };
   for (const kind of ['verify', 'members', 'info', 'vip', 'staff']) {
     assert.ok(permsFor(kind, ids, (f) => f).some((r) => r.id === 'CO'), `${kind} includes the co-owner role`);
+  }
+});
+
+test('the server log channel is never deleted, wherever it sits', async () => {
+  const dir = tmpDir();
+  try {
+    const cfg = { ...CFG, logs: { channelId: 'LOGCH' } };
+    const { setup } = mkServices(dir, 'db.json', cfg);
+    const data = currentServer();
+    data.channels.push({ id: 'LOGCH', name: 'server-logs', type: T.GuildText }); // loose, outside every kept category
+    const g = mkGuild(data);
+    const { plan } = await setup.preview(g, {});
+    assert.ok(plan.keptChannels.some((c) => c.id === 'LOGCH'));
+    assert.ok(!plan.remove.some((c) => c.id === 'LOGCH'));
+    await setup.execute(g, plan);
+    assert.ok(g.channels.cache.has('LOGCH'));
+    assert.ok(!g.deleted.channels.includes('LOGCH'));
+    assert.ok(!g.edited.channels.includes('LOGCH'));
+  } finally {
+    rm(dir);
+  }
+});
+
+test('the server log is muted while a rebuild runs and gets one summary afterwards', async () => {
+  const dir = tmpDir();
+  try {
+    const { setup } = mkServices(dir);
+    const cmd = require('../src/commands/setup');
+    const g = mkGuild(currentServer());
+    const calls = [];
+    const logs = {
+      hold: (id) => {
+        calls.push(['hold', id]);
+        return () => calls.push(['release', id]);
+      },
+      post: (guild, embed) => calls.push(['post', embed.toJSON().title]),
+    };
+    const first = mkInteraction(g, setup, { logs });
+    await cmd.execute(first.it, first.ctx);
+    const go = first.st.edits[0].components[0].toJSON().components[0].custom_id;
+    const b = mkInteraction(g, setup, { customId: go, logs });
+    await cmd.handleButton(b.it, b.ctx);
+    assert.deepEqual(calls, [['hold', 'G'], ['release', 'G'], ['post', 'Server rebuilt']]);
+
+    // a failure is logged as one as well, and still releases the mute
+    const g2 = mkGuild({ ...currentServer(), failCreateAt: 3 });
+    calls.length = 0;
+    const f1 = mkInteraction(g2, setup, { logs });
+    await cmd.execute(f1.it, f1.ctx);
+    const go2 = f1.st.edits[0].components[0].toJSON().components[0].custom_id;
+    const f2 = mkInteraction(g2, setup, { customId: go2, logs });
+    await cmd.handleButton(f2.it, f2.ctx);
+    assert.deepEqual(calls.map((c) => c[0]), ['hold', 'release', 'post']);
+    assert.equal(calls[2][1], 'Server rebuild did not finish');
+  } finally {
+    rm(dir);
   }
 });

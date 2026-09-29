@@ -252,12 +252,33 @@ module.exports = {
       }
     };
 
+    // One summary in the server log instead of a line for every channel and role the rebuild touches.
+    const release = ctx.logs ? ctx.logs.hold(interaction.guildId) : () => {};
     let res;
     try {
       res = await ctx.setup.execute(interaction.guild, plan, { onProgress });
     } catch (err) {
       console.error('[35xw] /setup server failed:', err);
       res = { ok: false, reason: 'error' };
+    } finally {
+      release();
+    }
+    if (ctx.logs) {
+      const rep = res.report;
+      ctx.logs.post(
+        interaction.guild,
+        card({
+          title: res.ok ? 'Server rebuilt' : 'Server rebuild did not finish',
+          fields: [
+            field('By', `${mention.user(interaction.user.id)} \`${interaction.user.id}\``, true),
+            ...(rep ? [field('Created', String(rep.created.length), true), field('Deleted', String(rep.deleted.length), true)] : []),
+            ...(res.ok ? [] : [field('Reason', String(res.reason))]),
+          ],
+          tone: res.ok ? 'warn' : 'danger',
+          footer: 'logs',
+          timestamp: true,
+        }),
+      );
     }
     return deliver(interaction, res.ok ? summaryCard(res.report) : failureCard(res), res.fallbackChannelId);
   },

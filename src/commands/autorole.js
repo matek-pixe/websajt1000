@@ -9,6 +9,7 @@ const { card, field, deny, ephemeral, mention, COPY } = require('../ui');
  */
 module.exports = {
   managerOnly: false,
+  audit: true, // leaves a line in the server log
   data: new SlashCommandBuilder()
     .setName('aa')
     .setDescription('Set the role every new member gets (owner only)')

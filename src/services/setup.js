@@ -252,10 +252,10 @@ const isThread = (c) => !!(c && typeof c.isThread === 'function' && c.isThread()
  *  undeletable   ids Discord will not let a bot delete (Community rules and updates channels)
  * Removal order: children first, categories last.
  */
-function classifyChannels(channels, { keepRoots, undeletable }) {
+function classifyChannels(channels, { keepRoots, undeletable, keepChannels = new Set() }) {
   const roots = new Set([...keepRoots].filter(Boolean));
   const all = channels.filter((c) => !isThread(c));
-  const kept = all.filter((c) => roots.has(c.id) || roots.has(c.parentId));
+  const kept = all.filter((c) => roots.has(c.id) || roots.has(c.parentId) || keepChannels.has(c.id));
   const keptIds = new Set(kept.map((c) => c.id));
   const rest = all.filter((c) => !keptIds.has(c.id));
   const blocked = rest.filter((c) => undeletable.has(c.id));
@@ -506,7 +506,9 @@ class SetupService {
     const ticketCat = this.tickets.findCategory(guild);
     const undeletable = new Set([guild.rulesChannelId, guild.publicUpdatesChannelId].filter(Boolean));
     const keepRoots = new Set([...keepCats.map((c) => c.id), ...(ticketCat ? [ticketCat.id] : [])]);
-    const channels = classifyChannels([...guild.channels.cache.values()], { keepRoots, undeletable });
+    // The server log channel is never deleted, wherever it sits.
+    const keepChannels = new Set([this.config.logs && this.config.logs.channelId].filter(Boolean));
+    const channels = classifyChannels([...guild.channels.cache.values()], { keepRoots, undeletable, keepChannels });
 
     const verified = this._verifiedRole(guild, opts);
     const protectedIds = new Map();
@@ -711,7 +713,7 @@ class SetupService {
       for (const item of plan.remove) {
         const ch = cache.get(item.id);
         if (!ch || newIds.has(ch.id)) continue;
-        if (liveRoots.has(ch.id) || liveRoots.has(ch.parentId) || ch.id === built.tickets.tr.id) continue; // kept, or moved into a kept category since the preview
+        if (liveRoots.has(ch.id) || liveRoots.has(ch.parentId) || ch.id === built.tickets.tr.id || ch.id === (this.config.logs && this.config.logs.channelId)) continue; // kept, or moved into a kept category since the preview
         try {
           await ch.delete('35xw /setup server');
           report.deleted.push(item.name);

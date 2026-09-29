@@ -174,9 +174,19 @@ module.exports = {
         ],
         components: [],
       });
+      // The log channel is deleted with everything else, so the start is written down first.
+      const release = ctx.logs ? ctx.logs.hold(interaction.guildId) : () => {};
+      if (ctx.logs) {
+        ctx.logs.post(
+          interaction.guild,
+          card({ title: 'Server wipe started', description: `${mention.user(interaction.user.id)} \`${interaction.user.id}\` confirmed /n. Every channel is being deleted.`, tone: 'danger', footer: 'logs', timestamp: true }),
+        );
+        await ctx.logs.flush();
+      }
       try {
         await performNuke(interaction, ctx);
       } finally {
+        release();
         nukingGuilds.delete(interaction.guildId);
       }
       return undefined;
