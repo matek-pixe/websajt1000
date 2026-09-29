@@ -110,7 +110,7 @@ const COPY = Object.freeze({
   serverOnly: 'This command only works inside a server.',
   managerOnly: (name) => `Only the bot manager can use /${name}.`,
   ownerOnly: (name) => `Only the server owner can use /${name}.`,
-  adminOnly: (name) => `Only administrators can use /${name}.`,
+  adminOnly: (name) => `Only admins can use /${name}.`,
   staffOnly: (name) => `Only staff can use /${name}.`,
   cooldown: (seconds, name) => `You can use /${name} again in ${seconds}s.`,
   notVerified: ({ roleId, channelId }) =>

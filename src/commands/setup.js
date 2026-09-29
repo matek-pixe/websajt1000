@@ -95,7 +95,7 @@ function failureCard(res) {
   if (res.reason === 'in_progress') text = 'A rebuild is already running on this server.';
   else if (res.reason === 'keep_missing') text = `The category ${tick(res.name)} is gone. Run /setup server again to see the new state.`;
   else if (res.reason === 'build_failed') {
-    text = `Building stopped, so I removed the channels I had just created and deleted nothing old. ${res.message || ''}`.trim();
+    text = `Building stopped. The channels created so far were removed again and nothing old was deleted. ${res.message || ''}`.trim();
   }
   return card({ title: 'Nothing was deleted', description: text, tone: 'danger', footer: 'setup' });
 }

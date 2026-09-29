@@ -134,7 +134,7 @@ test('/f refuses non-admins and un-assignable roles, and counts failures', async
   let i = fakeInteraction({ user: 'P', member: plain, guild: fakeGuild([]), role: ROLE });
   await massrole.execute(i, ctxFor());
   const said = (x) => x._st.replies[0].embeds[0].toJSON().description;
-  assert.ok(said(i).includes('Only administrators'));
+  assert.ok(said(i).includes('Only admins'));
 
   const admin = fakeMember('ADM', { perms: [PermissionFlagsBits.Administrator] });
   // role above the bot

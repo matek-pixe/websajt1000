@@ -298,7 +298,7 @@ client.on(Events.GuildMemberAdd, async (member) => {
     const res = await roleMemory.applyOnJoin(member);
     const sk = res.skipped || {};
     const notes = [];
-    if (sk.aboveBot && sk.aboveBot.length) notes.push(`${sk.aboveBot.length} above my role (move my role higher!)`);
+    if (sk.aboveBot && sk.aboveBot.length) notes.push(`${sk.aboveBot.length} above my role, move it higher`);
     if (sk.managed && sk.managed.length) notes.push(`${sk.managed.length} managed by an integration`);
     if (sk.missing && sk.missing.length) notes.push(`${sk.missing.length} deleted`);
     console.log(
