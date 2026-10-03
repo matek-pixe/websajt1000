@@ -108,22 +108,28 @@ function createWebServer({ web, clientId, sessionSecret, checkMember, roleNames 
   }
 
   // Ticket transcripts: public, but only reachable through the 32 random characters of their address.
+  // The page is /t/<token>/index.html, the original files of that ticket are /t/<token>/files/<n>-<name>.
   function handleTranscript(req, res, p) {
-    const m = /^\/t\/([A-Za-z0-9]{32})(?:\/(?:index\.html)?)?$/.exec(p);
-    const file = transcriptsDir && m ? path.join(transcriptsDir, m[1], 'index.html') : null;
-    let html;
-    try {
-      html = file ? fs.readFileSync(file) : null;
-    } catch {
-      html = null;
-    }
-    if (!html) return send(res, 404, 'Not found', { 'Content-Type': 'text/plain; charset=utf-8' });
-    return send(res, 200, html, {
+    const secure = {
       'Cache-Control': 'private, max-age=300',
       'X-Robots-Tag': 'noindex, nofollow',
       'X-Content-Type-Options': 'nosniff',
       'Referrer-Policy': 'no-referrer',
-    });
+    };
+    const page = /^\/t\/([A-Za-z0-9]{32})(?:\/(?:index\.html)?)?$/.exec(p);
+    const asset = /^\/t\/([A-Za-z0-9]{32})\/files\/(\d{1,4}-[A-Za-z0-9._-]{1,90})$/.exec(p);
+    const file = !transcriptsDir ? null : page ? path.join(transcriptsDir, page[1], 'index.html') : asset ? path.join(transcriptsDir, asset[1], 'files', asset[2]) : null;
+    let body;
+    try {
+      body = file ? fs.readFileSync(file) : null;
+    } catch {
+      body = null;
+    }
+    if (!body) return send(res, 404, 'Not found', { 'Content-Type': 'text/plain; charset=utf-8' });
+    if (page) return send(res, 200, body, secure);
+    // Originals are opaque bytes that download, so an uploaded .html or .svg never runs on this address.
+    const name = asset[2].replace(/^\d+-/, '');
+    return send(res, 200, body, { ...secure, 'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename="${name}"` });
   }
 
   // ---- routes ----

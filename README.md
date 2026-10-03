@@ -99,10 +99,17 @@ manager always can).
 - The transcript is **one self-contained page**: avatars, pictures people sent, custom emoji, embeds,
   buttons, replies, forwards and reactions are inside it, so it still looks right after Discord's own
   picture links expire and the ticket channel is gone. Times are shown in the viewer's own time zone.
-  Limits: 4 MB per picture and about 7 MB of pictures per page, the rest stay links.
+- **Pictures** are shown at a small size and **enlarge when clicked**. A picture over 1.5 MB is shown as a
+  reduced preview (Discord's media proxy makes it, longest side 1600 px) and says so under the picture.
+- **Every picture and file has a Download.** It comes from the best place there is: from the page itself
+  (pictures taken over as they are, files up to 1 MB), from the **online copy** of the ticket (big pictures
+  and files up to 25 MB, 100 MB per ticket, kept next to the page and downloaded as is), and only as a
+  last resort from Discord's own link, which says **Open original** because it can stop working. Without an
+  online place (below) the big ones fall back to that last resort.
+- A page holds about 7 MB of pictures and small files so it can still be attached as a file (Discord's
+  limit); with an online link, the same page is attached whenever it fits into 8 MB.
 - With an **online link** configured (below), every ticket also gets its **own address**,
-  `https://…/t/<32 random characters>/index.html`, opened with the **View transcript** button, and the
-  same page is attached as a file when it fits into Discord's upload limit (8 MB).
+  `https://…/t/<32 random characters>/index.html`, opened with the **View transcript** button.
 - `/add` gives someone access to a ticket.
 
 **Alerts.** Every new ticket is announced in the staff channel (`TICKET_NOTIFY_CHANNEL_ID`, pinging
@@ -155,8 +162,9 @@ too (set `R2_ENDPOINT` instead of `R2_ACCOUNT_ID`).
 `WEB_PUBLIC_URL`) the bot stores the pages in `data/transcripts/` and serves them at
 `<WEB_PUBLIC_URL>/t/<token>/index.html`, no login needed. If the website does not start, links through it are switched off.
 
-Good to know: the 32 random characters are the only protection, so **anyone with a link can read that
-transcript** (the page tells search engines not to index it). Nothing is deleted automatically. If putting
+Originals sit under `…/t/<token>/files/` and are served as plain downloads, so an uploaded `.html` or `.svg`
+can never run on that address. Good to know: the 32 random characters are the only protection, so **anyone
+with a link can read that transcript and download its files** (the page tells search engines not to index it). Nothing is deleted automatically. If putting
 a page online fails, the ticket still closes, the file is attached and the server log says why.
 
 ### Server setup (`/setup server`)

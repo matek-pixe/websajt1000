@@ -7,6 +7,8 @@ const path = require('node:path');
 /**
  * Puts a finished transcript online and returns its address, one unguessable address per ticket:
  *   <public url>/t/<32 random characters>/index.html
+ * The original files of that ticket (big pictures, documents) sit next to it, so a download works long
+ * after Discord's own links expired:  <public url>/t/<token>/files/<n>-<name>
  *
  * Two places can hold the page, the first one that is configured wins:
  *   1. a bucket on Cloudflare R2 (or any S3 compatible storage), uploaded with a signed request;
@@ -21,6 +23,18 @@ function newToken(length = 32) {
   let out = '';
   for (let i = 0; i < length; i++) out += ALPHABET[crypto.randomInt(ALPHABET.length)];
   return out;
+}
+
+/** A file name that is safe in an address and in a header. */
+function safeName(name) {
+  return (
+    String(name || 'file')
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^A-Za-z0-9._-]+/g, '_')
+      .replace(/^[._]+/, '')
+      .slice(-80) || 'file'
+  );
 }
 
 // ---------- AWS signature version 4 ----------
@@ -76,21 +90,15 @@ class TranscriptHost {
     return 'off, transcripts stay attached files';
   }
 
-  async _put(key, body) {
+  /** One signed upload to the bucket. */
+  async _put(key, body, { type = 'text/html; charset=utf-8', disposition = null } = {}) {
     const { endpoint, bucket, accessKeyId, secretAccessKey, region = 'auto' } = this.s3;
     const base = new URL(endpoint);
     const uri = `/${[bucket, ...key.split('/')].map(encodeSegment).join('/')}`;
-    const payload = Buffer.from(body, 'utf8');
-    const signed = signRequest({
-      method: 'PUT',
-      host: base.host,
-      uri,
-      headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'public, max-age=31536000, immutable' },
-      payloadHash: sha256(payload),
-      accessKeyId,
-      secretAccessKey,
-      region,
-    });
+    const payload = Buffer.isBuffer(body) ? body : Buffer.from(body, 'utf8');
+    const headers = { 'content-type': type, 'cache-control': 'public, max-age=31536000, immutable' };
+    if (disposition) headers['content-disposition'] = disposition;
+    const signed = signRequest({ method: 'PUT', host: base.host, uri, headers, payloadHash: sha256(payload), accessKeyId, secretAccessKey, region });
     const { host, ...send } = signed.headers; // fetch sets the host itself
     const res = await this.fetch(`${base.origin}${uri}`, { method: 'PUT', headers: send, body: payload, signal: AbortSignal.timeout(30_000) });
     if (!res.ok) {
@@ -100,22 +108,55 @@ class TranscriptHost {
     }
   }
 
-  /** Store the page and return { token, url }, or null when no place is configured. */
-  async publish(html) {
+  async _store(key, body, opts) {
+    if (this.s3) return this._put(key, body, opts);
+    const file = path.join(this.local.dir, ...key.replace(/^t\//, '').split('/'));
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(`${file}.tmp`, body);
+    fs.renameSync(`${file}.tmp`, file);
+    return undefined;
+  }
+
+  /**
+   * One ticket's place online. Its address is known before anything is uploaded, so the page can link
+   * to its own files. Returns null when no place is configured.
+   *   pageUrl            address of the page
+   *   putFile(name, buf) stores an original file, returns its download address
+   *   putPage(html)      stores the page last
+   */
+  session() {
     if (!this.enabled()) return null;
     const token = newToken();
-    const key = `t/${token}/index.html`;
-    if (this.s3) {
-      await this._put(key, html);
-      return { token, url: `${this.s3.publicUrl.replace(/\/+$/, '')}/${key}` };
-    }
-    const dir = path.join(this.local.dir, token);
-    fs.mkdirSync(dir, { recursive: true });
-    const file = path.join(dir, 'index.html');
-    fs.writeFileSync(`${file}.tmp`, html, 'utf8');
-    fs.renameSync(`${file}.tmp`, file);
-    return { token, url: `${this.local.publicUrl.replace(/\/+$/, '')}/${key}` };
+    const root = (this.s3 ? this.s3.publicUrl : this.local.publicUrl).replace(/\/+$/, '');
+    const base = `${root}/t/${token}`;
+    const host = this;
+    let n = 0;
+    return {
+      token,
+      pageUrl: `${base}/index.html`,
+      async putFile(name, buffer) {
+        n += 1;
+        const stored = `${n}-${safeName(name)}`;
+        const ascii = safeName(name);
+        const disposition = `attachment; filename="${ascii}"; filename*=UTF-8''${encodeSegment(String(name || ascii))}`;
+        // Served as opaque bytes that download: an uploaded .html or .svg can never run on this address.
+        await host._store(`t/${token}/files/${stored}`, buffer, { type: 'application/octet-stream', disposition });
+        return `${base}/files/${stored}`;
+      },
+      async putPage(html) {
+        await host._store(`t/${token}/index.html`, html, { type: 'text/html; charset=utf-8' });
+        return `${base}/index.html`;
+      },
+    };
+  }
+
+  /** Store a finished page on its own and return { token, url }, or null when no place is configured. */
+  async publish(html) {
+    const session = this.session();
+    if (!session) return null;
+    await session.putPage(html);
+    return { token: session.token, url: session.pageUrl };
   }
 }
 
-module.exports = { TranscriptHost, newToken, signRequest, TOKEN_RE };
+module.exports = { TranscriptHost, newToken, signRequest, safeName, TOKEN_RE };

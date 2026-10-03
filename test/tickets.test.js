@@ -890,9 +890,28 @@ async function closeWith({ host, mediaFetch, media }) {
   return { res, post, problems, dir };
 }
 
+/** A stand-in for TranscriptHost#session that records what is stored. */
+function fakeHost({ failPage = false } = {}) {
+  const stored = { page: null, files: [] };
+  const base = 'https://pub.example/t/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef';
+  return {
+    stored,
+    enabled: () => true,
+    session: () => ({
+      token: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef',
+      pageUrl: `${base}/index.html`,
+      putFile: async (name, buf) => (stored.files.push({ name, bytes: buf.length }), `${base}/files/${stored.files.length}-${name}`),
+      putPage: async (html) => {
+        if (failPage) throw new Error('upload failed (HTTP 403 AccessDenied)');
+        stored.page = html;
+        return `${base}/index.html`;
+      },
+    }),
+  };
+}
+
 test('close: with a host the transcript message gets a View transcript button, the file keeps its pictures', async () => {
-  const published = [];
-  const host = { enabled: () => true, publish: async (html) => (published.push(html), { url: 'https://pub.example/t/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef/index.html' }) };
+  const host = fakeHost();
   const { res, post, dir } = await closeWith({ host, mediaFetch: async () => imageReply() });
   try {
     assert.equal(res.ok, true);
@@ -904,7 +923,7 @@ test('close: with a host the transcript message gets a View transcript button, t
     const attached = Buffer.from(post.files[0].attachment).toString();
     assert.equal(post.files[0].name, 'transcript-0001.html');
     assert.ok(attached.includes('data:image/png;base64,'), 'pictures are inside the file');
-    assert.equal(published[0], attached, 'the online page and the file are the same page');
+    assert.equal(host.stored.page, attached, 'the online page and the file are the same page');
     assert.equal(post.embeds[0].toJSON().description, undefined);
   } finally {
     rm(dir);
@@ -921,7 +940,7 @@ test('close: without a host there is no button, and a failed upload still leaves
     rm(plain.dir);
   }
 
-  const broken = await closeWith({ host: { enabled: () => true, publish: async () => { throw new Error('upload failed (HTTP 403 AccessDenied)'); } }, mediaFetch: async () => imageReply() });
+  const broken = await closeWith({ host: fakeHost({ failPage: true }), mediaFetch: async () => imageReply() });
   try {
     assert.equal(broken.res.ok, true, 'the ticket still closes');
     assert.equal(broken.post.components, undefined);
@@ -934,10 +953,10 @@ test('close: without a host there is no button, and a failed upload still leaves
 });
 
 test('close: a page too big for Discord is link only with a host, and loses its pictures without one', async () => {
-  const media = { budgetBytes: 30 * 1024 * 1024, maxFileBytes: 9 * 1024 * 1024 };
+  const media = { budgetBytes: 30 * 1024 * 1024, maxFileBytes: 9 * 1024 * 1024, embedImageMax: 20 * 1024 * 1024 };
   const big = async () => imageReply(9 * 1024 * 1024 - 100);
 
-  const withHost = await closeWith({ host: { enabled: () => true, publish: async () => ({ url: 'https://pub.example/t/x/index.html' }) }, mediaFetch: big, media });
+  const withHost = await closeWith({ host: fakeHost(), mediaFetch: big, media });
   try {
     assert.equal(withHost.post.files, undefined, 'too large to attach');
     assert.ok(withHost.post.components[0]);
@@ -951,9 +970,46 @@ test('close: a page too big for Discord is link only with a host, and loses its 
     const file = Buffer.from(without.post.files[0].attachment).toString();
     assert.ok(file.length < 1_000_000, 'rebuilt without the pictures so it can be posted');
     assert.ok(!file.includes('data:image/png'));
-    assert.ok(file.includes('Image too large to embed'), 'the picture is still reachable as a link');
+    assert.ok(file.includes('Preview not available'), 'the picture is still reachable through its link');
+    assert.ok(file.includes('Open original'));
   } finally {
     rm(without.dir);
+  }
+});
+
+test('close: a big picture is shown reduced and its original is kept online for the Download button', async () => {
+  const host = fakeHost();
+  const asked = [];
+  const dir = tmpDir();
+  try {
+    const svc = new TicketService(new Storage(path.join(dir, 'db.json')), CFG);
+    svc.host = host;
+    svc.mediaFetch = async (url) => (asked.push(url), imageReply());
+    const g = mkGuild();
+    const r = await svc.createTicket(g, m('U2'));
+    r.channel._history = [
+      {
+        id: 'a',
+        createdTimestamp: 1000,
+        author: { id: 'U2', username: 'U2', tag: 'U2' },
+        content: 'screenshot',
+        attachments: new Map([
+          ['x', { name: 'huge.png', url: 'https://cdn.discordapp.com/attachments/1/huge.png', proxyURL: 'https://media.discordapp.net/attachments/1/huge.png?ex=1&is=2&hm=3', contentType: 'image/png', size: 6 * 1024 * 1024, width: 4000, height: 3000 }],
+          ['y', { name: 'notes.pdf', url: 'https://cdn.discordapp.com/attachments/1/notes.pdf', contentType: 'application/pdf', size: 3 * 1024 * 1024 }],
+        ]),
+        embeds: [],
+      },
+    ];
+    await svc.closeTicket(r.channel, { id: 'S', username: 'staff', tag: 'staff' });
+    const html = host.stored.page;
+    assert.ok(asked.some((u) => u.startsWith('https://media.discordapp.net/attachments/1/huge.png') && u.includes('width=1600') && u.includes('height=1200') && u.includes('format=webp')), 'the reduced copy was asked for');
+    assert.ok(html.includes('reduced preview, click to enlarge'));
+    assert.ok(host.stored.files.some((f) => f.name === 'huge.png'), 'the original picture is kept online');
+    assert.ok(host.stored.files.some((f) => f.name === 'notes.pdf'), 'so is the document that was too big for the page');
+    assert.ok(html.includes('Download original'));
+    assert.ok(html.includes('https://pub.example/t/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef/files/1-huge.png'));
+  } finally {
+    rm(dir);
   }
 });
 

@@ -88,7 +88,9 @@ const REPLY_TYPE = (MessageType && MessageType.Reply) ?? 19;
 const FORWARD_REF = (MessageReferenceType && MessageReferenceType.Forward) ?? 1;
 
 const plainAttachments = (coll) =>
-  coll ? [...coll.values()].map((a) => ({ name: a.name, url: a.url, contentType: a.contentType || '', size: a.size || 0 })) : [];
+  coll
+    ? [...coll.values()].map((a) => ({ name: a.name, url: a.url, proxyUrl: a.proxyURL || null, contentType: a.contentType || '', size: a.size || 0, width: a.width || 0, height: a.height || 0 }))
+    : [];
 
 /** Rich embeds as plain data: text, fields, colours and the pictures (their addresses, downloaded later). */
 const plainEmbeds = (list) =>
@@ -712,12 +714,13 @@ class TicketService {
     const guildIcon = typeof guild.iconURL === 'function' ? guild.iconURL({ extension: 'png', size: 128 }) : null;
 
     // Pictures go inside the page: Discord's own links expire and the ticket channel is about to be deleted.
-    const { media } = await inlineMedia(
+    const session = this.host.enabled() ? this.host.session() : null;
+    const { media, files } = await inlineMedia(
       { guildIcon, messages },
-      { ...(this.mediaFetch ? { fetchImpl: this.mediaFetch } : {}), ...(this.opts.media || {}) },
+      { ...(this.mediaFetch ? { fetchImpl: this.mediaFetch } : {}), ...(session ? { session } : {}), ...(this.opts.media || {}) },
     ).catch((err) => {
       console.warn(`[35xw] transcript pictures skipped: ${err.message}`);
-      return { media: new Map() };
+      return { media: new Map(), files: new Map() };
     });
     const page = (withMedia) =>
       renderTranscriptHtml({
@@ -729,14 +732,15 @@ class TicketService {
         closedBy: { id: closer.id, name: closerName },
         closedAt,
         media: withMedia ? media : new Map(),
+        files: withMedia ? files : new Map(),
       });
     let html = page(true);
 
     // Online copy: its own address per ticket.
     let link = null;
-    if (this.host.enabled()) {
+    if (session) {
       try {
-        link = (await this.host.publish(html)).url;
+        link = await session.putPage(html);
       } catch (err) {
         this._problem(guild, `The transcript of ${formatTicketName(ticket.number)} could not be put online (${err.message}). It is attached as a file instead.`, 'Transcript link failed');
       }

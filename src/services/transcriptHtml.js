@@ -137,16 +137,35 @@ function onlyEmoji(text) {
   return !!text && /^(\s*<a?:\w{2,32}:\d{15,25}>\s*){1,27}$/.test(text);
 }
 
-function renderAttachments(list, media) {
+/** The Download link of an attachment: from the page itself, from the online copy, or Discord's own link. */
+function downloadLink(att, info, kind) {
+  const name = esc(att.name || 'file');
+  const label = info && info.reduced ? 'Download original' : 'Download';
+  if (info && info.original === 'page') {
+    return kind === 'image'
+      ? `<a class="dl" href="#" data-from="img" data-name="${name}">${label}</a>`
+      : `<a class="dl" href="#" data-name="${name}" data-type="${esc(info.type || 'application/octet-stream')}" data-b64="${esc(info.data)}">${label}</a>`;
+  }
+  if (info && info.original === 'online' && safeUrl(info.onlineUrl)) {
+    return `<a class="dl" href="${esc(info.onlineUrl)}" rel="noopener noreferrer">${label}</a>`;
+  }
+  const link = safeUrl(att.url);
+  return link ? `<a class="dl" href="${esc(link)}" target="_blank" rel="noopener noreferrer" title="Discord's own link, it can stop working">Open original</a>` : '';
+}
+
+function renderAttachments(list, media, files = new Map()) {
   return (list || [])
     .map((att) => {
+      const info = files.get(att.url) || null;
+      const name = esc(att.name || 'attachment');
+      const size = att.size ? `<span class="media-size">${esc(fmtBytes(att.size))}</span>` : '';
       const data = isImage(att) ? media.get(att.url) : null;
       if (data) {
-        return `<div class="media"><img src="${esc(data)}" alt="${esc(att.name || 'image')}"></div>`;
+        const note = info && info.reduced ? '<span class="media-size">reduced preview, click to enlarge</span>' : '';
+        return `<div class="media"><img src="${esc(data)}" alt="${name}"><div class="media-bar"><span class="media-name">${name}</span>${size}${note}${downloadLink(att, info, 'image')}</div></div>`;
       }
-      const link = safeUrl(att.url);
-      const note = isImage(att) ? 'Image too large to embed, open the original' : fmtBytes(att.size);
-      return `<div class="file"><span class="file-icon">${isImage(att) ? '🖼️' : '📎'}</span><div><div class="file-name">${link ? `<a href="${esc(link)}" target="_blank" rel="noopener noreferrer">${esc(att.name || 'attachment')}</a>` : esc(att.name || 'attachment')}</div><div class="file-size">${esc(note)}</div></div></div>`;
+      const note = isImage(att) ? 'Preview not available' : fmtBytes(att.size);
+      return `<div class="file"><span class="file-icon">${isImage(att) ? '🖼️' : '📎'}</span><div><div class="file-name">${name}</div><div class="file-size">${esc(note)}</div></div>${downloadLink(att, info, 'file')}</div>`;
     })
     .join('');
 }
@@ -235,22 +254,22 @@ function renderReply(m, byId, media) {
 }
 
 /** A forwarded message is shown as a quoted block with its own content, files and embeds. */
-function renderForward(f, media, message) {
+function renderForward(f, media, message, files) {
   if (!f) return '';
   const ctx = makeCtx(message || {}, media);
   const content = f.content ? `<div class="content">${renderContent(f.content, {}, ctx)}</div>` : '';
-  return `<div class="forward"><div class="forward-label">↪ Forwarded${f.createdTimestamp ? ` · ${tsSpan(f.createdTimestamp, 'f')}` : ''}</div>${content}${renderAttachments(f.attachments, media)}${renderEmbeds(f.embeds, media, message)}</div>`;
+  return `<div class="forward"><div class="forward-label">↪ Forwarded${f.createdTimestamp ? ` · ${tsSpan(f.createdTimestamp, 'f')}` : ''}</div>${content}${renderAttachments(f.attachments, media, files)}${renderEmbeds(f.embeds, media, message)}</div>`;
 }
 
 const GROUP_MS = 7 * 60 * 1000;
 
-function renderMessage(m, prev, byId, media) {
+function renderMessage(m, prev, byId, media, files) {
   const a = m.author || {};
   const grouped = !!prev && !m.replyTo && prev.author && a.id && prev.author.id === a.id && m.createdTimestamp - prev.createdTimestamp < GROUP_MS;
   const ctx = { ...makeCtx(m, media), jumbo: onlyEmoji(m.content) };
   const content = m.content ? `<div class="content">${renderContent(m.content, m.mentions, ctx)}${m.edited ? ' <span class="edited">(edited)</span>' : ''}</div>` : '';
   const rest =
-    `${content}${renderForward(m.forwarded, media, m)}${renderAttachments(m.attachments, media)}${renderStickers(m.stickers, media)}` +
+    `${content}${renderForward(m.forwarded, media, m, files)}${renderAttachments(m.attachments, media, files)}${renderStickers(m.stickers, media)}` +
     `${renderEmbeds(m.embeds, media, m)}${renderButtons(m.components)}${renderReactions(m.reactions, media)}`;
   const id = `m${esc(String(m.id || '').replace(/\D/g, ''))}`;
 
@@ -316,7 +335,11 @@ pre.codeblock code{background:none;padding:0;white-space:pre}
 .reply-name{font-weight:600;color:#f2f3f5;margin-right:4px}.reply-text{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:70vw}.reply-deleted{margin-left:30px;font-style:italic}
 .forward{border-left:4px solid #4e5058;padding:4px 10px;margin:4px 0;border-radius:4px}.forward-label{color:var(--muted);font-size:13px;margin-bottom:2px}
 .media{margin:6px 0;max-width:520px}.media img{max-width:100%;max-height:400px;border-radius:8px;display:block;cursor:zoom-in}
+.media-bar{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;margin-top:4px;font-size:13px}
+.media-name{color:var(--text);font-weight:500;overflow-wrap:anywhere}.media-size{color:var(--muted);font-size:12px}
+a.dl{color:var(--link);font-weight:500;cursor:pointer}
 .file{display:flex;align-items:center;gap:10px;background:var(--bg2);border:1px solid var(--bg3);border-radius:8px;padding:10px 12px;margin:6px 0;max-width:520px}
+.file>div{min-width:0;flex:1}.file a.dl{flex:none;background:#4e5058;color:#fff;border-radius:4px;padding:4px 12px;font-size:14px}.file a.dl:hover{text-decoration:none;background:#5d6069}
 .file-icon{font-size:28px}.file-name{font-weight:500}.file-size{color:var(--muted);font-size:12px}
 .embed{display:flex;gap:16px;background:var(--bg2);border-left:4px solid #202225;border-radius:4px;padding:8px 16px 12px 12px;margin:6px 0;max-width:520px}
 .embed-body{min-width:0;flex:1}
@@ -356,8 +379,22 @@ const SCRIPT = `
     var v=el.getAttribute('data-ts');if(!v)return;var d=new Date(v);if(isNaN(d))return;
     el.textContent=fmt(d,el.getAttribute('data-style'));el.title=d.toLocaleString();
   });
+  function save(a){
+    var b64,type;
+    if(a.getAttribute('data-from')==='img'){
+      var m=/^data:([^;,]+);base64,(.*)$/.exec(a.closest('.media').querySelector('img').src);
+      if(!m)return;type=m[1];b64=m[2];
+    }else{type=a.getAttribute('data-type')||'application/octet-stream';b64=a.getAttribute('data-b64')}
+    var bin=atob(b64),bytes=new Uint8Array(bin.length);
+    for(var i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
+    var url=URL.createObjectURL(new Blob([bytes],{type:type})),l=document.createElement('a');
+    l.href=url;l.download=a.getAttribute('data-name')||'file';document.body.appendChild(l);l.click();l.remove();
+    setTimeout(function(){URL.revokeObjectURL(url)},2000);
+  }
   document.getElementById('lightbox').addEventListener('click',function(){this.classList.remove('open')});
   document.addEventListener('click',function(e){
+    var dl=e.target.closest('a.dl[data-name]');
+    if(dl&&(dl.hasAttribute('data-b64')||dl.getAttribute('data-from')==='img')){e.preventDefault();save(dl);return}
     var sp=e.target.closest('.spoiler');
     if(sp&&!sp.classList.contains('revealed')){sp.classList.add('revealed');e.preventDefault();return}
     var img=e.target.closest('.media img,.embed-image img');
@@ -376,8 +413,9 @@ const SCRIPT = `
  * @param {number} [p.closedAt]
  * @param {string} [p.ticketName]  e.g. ticket-0001
  * @param {Map<string,string>} [p.media]  image url -> data: URI
+ * @param {Map<string,object>} [p.files]  attachment url -> where its original is (page, online or nowhere)
  */
-function renderTranscriptHtml({ ticket, guildName, guildIcon, messages, closedBy, closedAt, ticketName, media = new Map() }) {
+function renderTranscriptHtml({ ticket, guildName, guildIcon, messages, closedBy, closedAt, ticketName, media = new Map(), files = new Map() }) {
   const name = ticketName || `ticket-${String(ticket.number).padStart(4, '0')}`;
   const closed = closedAt || Date.now();
   const byId = new Map(messages.map((m) => [m.id, m]));
@@ -390,7 +428,7 @@ function renderTranscriptHtml({ ticket, guildName, guildIcon, messages, closedBy
   }
   const chips = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([n, c]) => `<span class="participant">${esc(n)} <span class="muted">${c}</span></span>`).join('');
 
-  const rows = messages.map((m, i) => renderMessage(m, messages[i - 1] || null, byId, media)).join('\n');
+  const rows = messages.map((m, i) => renderMessage(m, messages[i - 1] || null, byId, media, files)).join('\n');
   const icon = guildIcon && media.get(guildIcon);
   const iconHtml = icon ? `<img class="guild-icon" src="${esc(icon)}" alt="">` : `<div class="guild-icon placeholder">${esc((guildName || '?').slice(0, 1).toUpperCase())}</div>`;
   const row = (k, v) => `<div class="info-row"><span class="info-key">${k}</span><span class="info-val">${v}</span></div>`;

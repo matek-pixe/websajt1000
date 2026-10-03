@@ -80,8 +80,9 @@ test('renderTranscriptHtml: header facts, messages, escaping, attachments, bot t
   assert.ok(html.includes(`<img class="avatar" src="${PNG}"`)); // avatar embedded, not linked
   assert.ok(html.includes(`<div class="media"><img src="${PNG}" alt="pic.png">`)); // picture embedded
   assert.ok(!html.includes('src="https://cdn/'), 'nothing is loaded from the network');
-  assert.ok(html.includes('Image too large to embed')); // not in media -> a link, never a broken image
-  assert.ok(html.includes('rel="noopener noreferrer">doc.pdf</a>'));
+  assert.ok(html.includes('Preview not available')); // not in media -> a card with a link, never a broken image
+  assert.ok(html.includes('file-name">doc.pdf</div>'));
+  assert.ok(html.includes('href="https://cdn/doc.pdf" target="_blank" rel="noopener noreferrer"'), 'no kept copy: Discord link');
   assert.ok(html.includes('2 KB'));
   assert.ok(html.includes('embed-title">T<'));
   assert.ok(html.includes('border-left-color:#aa0000'));
@@ -203,4 +204,55 @@ test('renderContent: a link keeps its underscores and ampersands', () => {
   const out = renderContent('see https://a.b/c_d_e?x=1&y=2 now');
   assert.ok(out.includes('<a href="https://a.b/c_d_e?x=1&amp;y=2"'));
   assert.ok(!out.includes('<em>'));
+});
+
+test('renderTranscriptHtml: every picture and file gets a Download from the best place there is', () => {
+  const att = (name, url, over = {}) => ({ name, url, contentType: name.endsWith('.png') ? 'image/png' : 'application/pdf', size: 2048, ...over });
+  const media = new Map([
+    ['https://cdn/own.png', PNG],
+    ['https://cdn/reduced.png', PNG],
+  ]);
+  const files = new Map([
+    ['https://cdn/own.png', { shown: true, reduced: false, original: 'page' }],
+    ['https://cdn/reduced.png', { shown: true, reduced: true, original: 'online', onlineUrl: 'https://pub.example/t/T/files/1-reduced.png' }],
+    ['https://cdn/small.pdf', { original: 'page', data: 'QUJD', type: 'application/pdf' }],
+    ['https://cdn/big.pdf', { original: 'online', onlineUrl: 'https://pub.example/t/T/files/2-big.pdf' }],
+  ]);
+  const html = renderTranscriptHtml({
+    ticket,
+    guildName: 'S',
+    closedAt: Date.UTC(2026, 0, 1, 11, 0),
+    media,
+    files,
+    messages: [
+      msg({ attachments: [att('own.png', 'https://cdn/own.png'), att('reduced.png', 'https://cdn/reduced.png', { size: 6 * 1024 * 1024 }), att('small.pdf', 'https://cdn/small.pdf'), att('big.pdf', 'https://cdn/big.pdf'), att('gone.zip', 'https://cdn/gone.zip', { contentType: 'application/zip' })] }),
+    ],
+  });
+  // a picture that is the original: downloaded from the page itself
+  assert.ok(html.includes('<a class="dl" href="#" data-from="img" data-name="own.png">Download</a>'));
+  // a reduced preview: the original comes from the online copy, and the page says it is reduced
+  assert.ok(html.includes('reduced preview, click to enlarge'));
+  assert.ok(html.includes('<a class="dl" href="https://pub.example/t/T/files/1-reduced.png" rel="noopener noreferrer">Download original</a>'));
+  // a small file travels inside the page
+  assert.ok(html.includes('data-name="small.pdf" data-type="application/pdf" data-b64="QUJD">Download</a>'));
+  // a big file is downloaded from the online copy
+  assert.ok(html.includes('<a class="dl" href="https://pub.example/t/T/files/2-big.pdf" rel="noopener noreferrer">Download</a>'));
+  // nothing kept: Discord's own link, honestly labelled
+  assert.ok(html.includes(`href="https://cdn/gone.zip" target="_blank" rel="noopener noreferrer" title="Discord's own link, it can stop working">Open original</a>`));
+  // the page script saves from the page and the picture can be enlarged
+  assert.ok(html.includes('URL.createObjectURL'));
+  assert.ok(html.includes('.media img,.embed-image img'));
+});
+
+test('renderTranscriptHtml: a hostile file name or address cannot break out of the markup', () => {
+  const html = renderTranscriptHtml({
+    ticket,
+    guildName: 'S',
+    closedAt: Date.UTC(2026, 0, 1, 11, 0),
+    files: new Map([['https://cdn/a', { original: 'online', onlineUrl: 'javascript:alert(1)' }]]),
+    messages: [msg({ attachments: [{ name: '"><script>x</script>.pdf', url: 'https://cdn/a', contentType: 'application/pdf', size: 1 }] })],
+  });
+  assert.ok(!html.includes('"><script>x'));
+  assert.ok(!/href="javascript:/i.test(html));
+  assert.equal((html.match(/<script/g) || []).length, 1);
 });
