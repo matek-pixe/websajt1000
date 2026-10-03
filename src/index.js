@@ -10,7 +10,7 @@ const { RoleMemoryService } = require('./services/roleMemory');
 const { TicketService } = require('./services/tickets');
 const { BypassService } = require('./services/bypass');
 const { SetupService } = require('./services/setup');
-const { card, deny, COPY } = require('./ui');
+const { card, deny, lines, COPY } = require('./ui');
 const { LogService } = require('./services/logs');
 const { AntiNukeService } = require('./services/antinuke');
 const { refusal, isOwnerOrManager: ownerOrManager } = require('./gates');
@@ -137,6 +137,7 @@ async function startWeb(c) {
   if (!w.roleIds.length) missing.push('WEB_ROLE_ID');
   if (missing.length) {
     console.warn(`[35xw] web: NOT started, missing ${missing.join(', ')} in .env`);
+    tickets.host.local = null; // the site is not up, so transcript links through it would be dead
     return;
   }
 
@@ -158,8 +159,12 @@ async function startWeb(c) {
     sessionSecret: loadOrCreateWebSecret(),
     checkMember,
     roleNames,
+    transcriptsDir: config.transcripts.local.dir,
   });
-  const { port } = await site.start();
+  const { port } = await site.start().catch((err) => {
+    tickets.host.local = null;
+    throw err;
+  });
   console.log(`[35xw] web: listening on ${w.host}:${port} | public URL: ${w.publicUrl || '(from request host)'}`);
   console.log(`[35xw] web: access requires role(s) ${roleNames().join(', ')} on guild ${w.guildId}`);
   console.log(`[35xw] web: OAuth2 redirect must be ${w.publicUrl || 'https://<your-domain>'}/callback`);
@@ -183,6 +188,10 @@ const client = new Client({
 const logs = new LogService(client, config.logs);
 services.logs = logs;
 logs.attach();
+
+// A ticket alert that could not be delivered shows up in the server log, where it is easy to notice.
+tickets.onProblem = (guild, text, title) =>
+  logs.post(guild, card({ title: title || 'Ticket alert failed', description: text, tone: 'danger', footer: 'tickets', timestamp: true }));
 
 const antiNuke = new AntiNukeService({ client, storage, config, logs });
 services.antiNuke = antiNuke;
@@ -218,11 +227,19 @@ client.once(Events.ClientReady, async (c) => {
   }
   let logged = 0;
   for (const guild of c.guilds.cache.values()) if (logs.announce(guild)) logged += 1;
+  for (const guild of c.guilds.cache.values()) {
+    const problems = tickets.alertProblems(guild);
+    if (!problems.length) continue;
+    console.warn(`[35xw] ${guild.name}: ticket alerts need attention: ${problems.join(' | ')}`);
+    logs.post(guild, card({ title: 'Ticket alerts need attention', description: lines(problems, { max: 8, limit: 3000 }), tone: 'warn', footer: 'tickets', timestamp: true }));
+  }
   if (config.logs.enabled && !logged) console.warn(`[35xw] logs: channel ${config.logs.channelId} was not found on any server, so nothing is logged.`);
   console.log('[35xw] Ready.');
 
   // Website (optional) — never lets a web problem take the bot down.
-  startWeb(c).catch((err) => console.error(`[35xw] web: failed to start: ${err.message}`));
+  startWeb(c)
+    .catch((err) => console.error(`[35xw] web: failed to start: ${err.message}`))
+    .finally(() => console.log(`[35xw] Transcript links: ${tickets.host.describe()}`));
 });
 
 // ---- slash commands + buttons ----

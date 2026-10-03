@@ -16,11 +16,13 @@ const modules = [
   require('./roles'),
   require('./setup'),
   require('./antinuke'),
+  require('./ban'),
   require('./help'),
   // ticket system
   require('./verify'),
   require('./ticketClose'),
   require('./ticketAdd'),
+  require('./ticketAlert'),
   require('./ping'),
 ];
 

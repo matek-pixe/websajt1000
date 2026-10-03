@@ -45,10 +45,11 @@ async function defaultFetchUser(accessToken) {
  * @param {string} p.sessionSecret  secret used to sign session cookies
  * @param {(userId: string) => Promise<{isMember: boolean, roleIds: string[]}>} p.checkMember
  * @param {() => string[]} [p.roleNames]  human names of the required roles (for the denied page)
+ * @param {string} [p.transcriptsDir]  folder with one <token>/index.html per ticket, served at /t/<token>/index.html
  * @param {object} [p.deps]         { exchangeCode, fetchUser } overrides
  * @param {object} [p.log]
  */
-function createWebServer({ web, clientId, sessionSecret, checkMember, roleNames = () => [], deps = {}, log = console }) {
+function createWebServer({ web, clientId, sessionSecret, checkMember, roleNames = () => [], transcriptsDir = null, deps = {}, log = console }) {
   const exchangeCode = deps.exchangeCode || defaultExchangeCode;
   const fetchUser = deps.fetchUser || defaultFetchUser;
   const publicDir = path.join(web.dir, 'public');
@@ -104,6 +105,25 @@ function createWebServer({ web, clientId, sessionSecret, checkMember, roleNames 
     res.writeHead(200, { 'Content-Type': contentType(file), 'Content-Length': stat.size, 'Cache-Control': 'no-store' });
     fs.createReadStream(file).pipe(res);
     return undefined;
+  }
+
+  // Ticket transcripts: public, but only reachable through the 32 random characters of their address.
+  function handleTranscript(req, res, p) {
+    const m = /^\/t\/([A-Za-z0-9]{32})(?:\/(?:index\.html)?)?$/.exec(p);
+    const file = transcriptsDir && m ? path.join(transcriptsDir, m[1], 'index.html') : null;
+    let html;
+    try {
+      html = file ? fs.readFileSync(file) : null;
+    } catch {
+      html = null;
+    }
+    if (!html) return send(res, 404, 'Not found', { 'Content-Type': 'text/plain; charset=utf-8' });
+    return send(res, 200, html, {
+      'Cache-Control': 'private, max-age=300',
+      'X-Robots-Tag': 'noindex, nofollow',
+      'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'no-referrer',
+    });
   }
 
   // ---- routes ----
@@ -196,6 +216,7 @@ function createWebServer({ web, clientId, sessionSecret, checkMember, roleNames 
 
     if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'Method not allowed');
     if (p === '/health') return send(res, 200, 'ok', { 'Content-Type': 'text/plain' });
+    if (p.startsWith('/t/')) return handleTranscript(req, res, p);
     if (p === '/login') return handleLogin(req, res);
     if (p === '/callback') return handleCallback(req, res, url);
     if (p === '/logout') return redirect(res, '/', { 'Set-Cookie': clearSessionCookie(req) });

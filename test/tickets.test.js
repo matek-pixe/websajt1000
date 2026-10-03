@@ -200,7 +200,7 @@ test('close: saves the HTML transcript to the single #transcripts channel, then 
     const post = tr.sent[0];
     assert.equal(post.files[0].name, 'transcript-0002.html');
     const html = Buffer.from(post.files[0].attachment).toString();
-    assert.ok(html.includes('🎫 ticket-0002'));
+    assert.ok(html.includes('# ticket-0002'));
     assert.ok(html.indexOf('help &lt;b&gt;me&lt;/b&gt;') < html.indexOf('hello'), 'oldest first, escaped');
     const embed = post.embeds[0].toJSON();
     const field = (n) => embed.fields.find((f) => f.name === n).value;
@@ -849,5 +849,208 @@ test('tk:close button: denial and already-closing answers are cards, the private
     assert.equal(cardOf(twice._sent.follow[0]).description, 'This ticket is already being closed.');
   } finally {
     rm(dir);
+  }
+});
+
+// ---------- online transcript link ----------
+
+const PNG_BYTES = Buffer.from('89504e470d0a1a0a', 'hex');
+const imageReply = (size = 8) => ({
+  ok: true,
+  status: 200,
+  headers: { get: (h) => (h.toLowerCase() === 'content-type' ? 'image/png' : null) },
+  body: (async function* () {
+    yield size === 8 ? PNG_BYTES : Buffer.alloc(size, 7);
+  })(),
+});
+
+async function closeWith({ host, mediaFetch, media }) {
+  const dir = tmpDir();
+  const svc = new TicketService(new Storage(path.join(dir, 'db.json')), { ...CFG, tickets: { ...CFG.tickets, ...(media ? { media } : {}) } });
+  if (host) svc.host = host;
+  if (mediaFetch) svc.mediaFetch = mediaFetch;
+  const problems = [];
+  svc.onProblem = (guild, text, title) => problems.push({ text, title });
+  const g = mkGuild();
+  const r = await svc.createTicket(g, m('U2'));
+  r.channel._history = [
+    {
+      id: 'a',
+      createdTimestamp: 1000,
+      author: { id: 'U2', username: 'U2', tag: 'U2', avatar: 'https://cdn.discordapp.com/avatars/2/a.png' },
+      content: 'proof',
+      attachments: new Map([['x', { name: 'proof.png', url: 'https://cdn.discordapp.com/attachments/1/proof.png', contentType: 'image/png', size: 8 }]]),
+      embeds: [],
+    },
+  ];
+  const res = await svc.closeTicket(r.channel, { id: 'S', username: 'staff', tag: 'staff' });
+  const post = [...g._store.values()].find((c) => c.name === 'transcripts').sent[0];
+  return { res, post, problems, dir };
+}
+
+test('close: with a host the transcript message gets a View transcript button, the file keeps its pictures', async () => {
+  const published = [];
+  const host = { enabled: () => true, publish: async (html) => (published.push(html), { url: 'https://pub.example/t/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef/index.html' }) };
+  const { res, post, dir } = await closeWith({ host, mediaFetch: async () => imageReply() });
+  try {
+    assert.equal(res.ok, true);
+    assert.equal(res.url, 'https://pub.example/t/ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef/index.html');
+    const button = post.components[0].toJSON().components[0];
+    assert.equal(button.style, 5); // link button
+    assert.equal(button.label, 'View transcript');
+    assert.equal(button.url, res.url);
+    const attached = Buffer.from(post.files[0].attachment).toString();
+    assert.equal(post.files[0].name, 'transcript-0001.html');
+    assert.ok(attached.includes('data:image/png;base64,'), 'pictures are inside the file');
+    assert.equal(published[0], attached, 'the online page and the file are the same page');
+    assert.match(post.embeds[0].toJSON().description, /online with the button.*attached/);
+  } finally {
+    rm(dir);
+  }
+});
+
+test('close: without a host there is no button, and a failed upload still leaves the file and tells the log', async () => {
+  const plain = await closeWith({ mediaFetch: async () => imageReply() });
+  try {
+    assert.equal(plain.post.components, undefined);
+    assert.ok(plain.post.files[0]);
+    assert.match(plain.post.embeds[0].toJSON().description, /attached \*\*\.html\*\* file/);
+  } finally {
+    rm(plain.dir);
+  }
+
+  const broken = await closeWith({ host: { enabled: () => true, publish: async () => { throw new Error('upload failed (HTTP 403 AccessDenied)'); } }, mediaFetch: async () => imageReply() });
+  try {
+    assert.equal(broken.res.ok, true, 'the ticket still closes');
+    assert.equal(broken.post.components, undefined);
+    assert.ok(broken.post.files[0]);
+    assert.equal(broken.problems[0].title, 'Transcript link failed');
+    assert.match(broken.problems[0].text, /AccessDenied/);
+  } finally {
+    rm(broken.dir);
+  }
+});
+
+test('close: a page too big for Discord is link only with a host, and loses its pictures without one', async () => {
+  const media = { budgetBytes: 30 * 1024 * 1024, maxFileBytes: 9 * 1024 * 1024 };
+  const big = async () => imageReply(9 * 1024 * 1024 - 100);
+
+  const withHost = await closeWith({ host: { enabled: () => true, publish: async () => ({ url: 'https://pub.example/t/x/index.html' }) }, mediaFetch: big, media });
+  try {
+    assert.equal(withHost.post.files, undefined, 'too large to attach');
+    assert.ok(withHost.post.components[0]);
+    assert.match(withHost.post.embeds[0].toJSON().description, /too large to attach/);
+  } finally {
+    rm(withHost.dir);
+  }
+
+  const without = await closeWith({ mediaFetch: big, media });
+  try {
+    const file = Buffer.from(without.post.files[0].attachment).toString();
+    assert.ok(file.length < 1_000_000, 'rebuilt without the pictures so it can be posted');
+    assert.ok(!file.includes('data:image/png'));
+    assert.ok(file.includes('Image too large to embed'), 'the picture is still reachable as a link');
+  } finally {
+    rm(without.dir);
+  }
+});
+
+// ---------- alerts ----------
+
+function alertKit({ notify = {}, config = {} } = {}) {
+  const dir = tmpDir();
+  const cfg = { ...CFG, ...config, tickets: { ...CFG.tickets, notify: { userId: 'OWNER', channelId: 'NEWS', roleIds: ['R1'], ...notify } } };
+  const svc = new TicketService(new Storage(path.join(dir, 'db.json')), cfg);
+  const g = mkGuild('G');
+  g.ownerId = 'SOMEONE';
+  g.roles.cache = new Map([['R1', { id: 'R1', mentionable: true }]]);
+  g.members.me = { id: 'BOT', permissions: { has: () => true } };
+  g.client = { users: { send: async () => ({}) } };
+  const problems = [];
+  svc.onProblem = (guild, text, title) => problems.push({ text, title });
+  return { svc, g, problems, done: () => rm(dir) };
+}
+
+test('alerts: a server counts as the owner server by its staff channel, its owner or GUILD_ID', () => {
+  const k = alertKit();
+  try {
+    assert.equal(k.svc._isHome(k.g), false);
+    k.g.ownerId = 'OWNER';
+    assert.equal(k.svc._isHome(k.g), true);
+    k.g.ownerId = 'SOMEONE';
+    k.g._store.set('NEWS', { id: 'NEWS', name: 'staff-news', send: async () => {} });
+    assert.equal(k.svc._isHome(k.g), true);
+    k.g._store.delete('NEWS');
+    k.svc.config.guildId = 'G';
+    assert.equal(k.svc._isHome(k.g), true, 'a server named in GUILD_ID is the owner server even if the staff channel is gone');
+  } finally {
+    k.done();
+  }
+});
+
+test('alerts: what is wrong is named, and other servers report nothing', () => {
+  const k = alertKit({ config: { guildId: 'G' } });
+  try {
+    k.g.roles.cache = new Map([['R1', { id: 'R1', mentionable: false }]]);
+    k.g.members.me.permissions.has = () => false;
+    const out = k.svc.alertProblems(k.g);
+    assert.ok(out.some((t) => /staff channel .*was not found/.test(t)));
+    assert.ok(out.some((t) => /cannot be pinged/.test(t)));
+
+    k.g._store.set('NEWS', { id: 'NEWS', send: async () => {}, permissionsFor: () => ({ has: () => false }) });
+    assert.ok(k.svc.alertProblems(k.g).some((t) => /missing View Channel, Send Messages, Embed Links/.test(t)));
+
+    k.g.roles.cache = new Map();
+    assert.ok(k.svc.alertProblems(k.g).some((t) => /does not exist on this server/.test(t)));
+
+    const other = mkGuild('H');
+    other.ownerId = 'X';
+    assert.deepEqual(k.svc.alertProblems(other), []);
+  } finally {
+    k.done();
+  }
+});
+
+test('alerts: a test sends without pinging, reports each part and explains a blocked DM', async () => {
+  const k = alertKit({ notify: { roleIds: ['R1', 'R2'] } });
+  try {
+    const sent = [];
+    k.g._store.set('NEWS', { id: 'NEWS', name: 'staff-news', send: async (p) => sent.push(p) });
+    k.g.roles.cache.set('R2', { id: 'R2', mentionable: true });
+    k.g.client.users.send = async () => {
+      const err = new Error('Cannot send messages to this user');
+      err.code = 50007;
+      throw err;
+    };
+    const report = await k.svc.notifyOpened(k.g, m('U1'), { id: 'C1' }, 0, { test: true });
+    assert.equal(report.staff.ok, true);
+    assert.equal(report.dm.ok, false);
+    assert.match(report.dm.error, /allow direct messages from server members/);
+    assert.deepEqual(sent[0].allowedMentions, { roles: [], users: [] }, 'a test pings nobody');
+    assert.equal(sent[0].content, '<@&R1> <@&R2>', 'but shows who would be pinged');
+    assert.equal(sent[0].embeds[0].toJSON().title, 'Test ticket alert');
+    assert.deepEqual(report.roles, ['R1', 'R2']);
+    assert.equal(k.problems.length, 1, 'the failure also goes to the server log');
+
+    k.g._store.get('NEWS').send = async () => {
+      const err = new Error('Missing Access');
+      err.code = 50001;
+      throw err;
+    };
+    const again = await k.svc.notifyOpened(k.g, m('U1'), { id: 'C1' }, 0, { test: true });
+    assert.match(again.staff.error, /not allowed to post in <#NEWS>.*View Channel, Send Messages and Embed Links/);
+  } finally {
+    k.done();
+  }
+});
+
+test('alerts: another server is skipped quietly', async () => {
+  const k = alertKit();
+  try {
+    const report = await k.svc.notifyOpened(k.g, m('U1'), { id: 'C1' }, 3);
+    assert.equal(report.skipped, 'not the owner server');
+    assert.equal(k.problems.length, 0);
+  } finally {
+    k.done();
   }
 });

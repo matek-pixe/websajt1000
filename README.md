@@ -19,6 +19,8 @@ gives everyone an **auto role** on join, **remembers each member's roles** by th
 | `/antinuke [mode]` | **server owner** | Shows or switches the anti-nuke protection of this server (on by default). See *Anti-nuke* below. |
 | `/aa` | **server owner** | Sets the role every new member gets on **this** server, e.g. `/aa @Member`. Run with no role to see the current setting. |
 | `/f role` | **admins** | Gives a role to **every member** of the server (bots skipped unless `bots:true`). `action:Remove` takes it away from everyone. Shows progress and a summary. |
+| `/ban user [reason]` | **admins** | Bans a member (or a user id that already left) and writes the reason, with the admin's name, into the audit log. The target must sit below the admin and the bot in the role list. |
+| `/ticketalert` | **server owner** | Sends a test ticket alert (nobody is pinged) and shows what arrived and what did not, with the fix. |
 | `/roles` | **staff** | Shows the roles the bot remembers for a user (`user:` or paste an `id:` of someone who left) and whether it can restore them, with the reason if not. |
 | `/refills` | **manager only** | Attach `steam.txt` to refill the Steam pool. |
 | `/refill5` | **manager only** | Attach `fivem.txt` to refill the FiveM pool. |
@@ -89,18 +91,28 @@ manager always can).
   see it and write in it. It greets the opener with *"Please wait for your role, our moderators will
   be here shortly."* and a 🔒 **Close** button.
 - **Close** (opener or staff, button or `/close`) does everything in one go: it renders the whole
-  conversation as a Discord-styled **HTML transcript** (`transcript-NNNN.html`, same number as the
-  ticket, with avatars, names, timestamps, images and links), posts it into the single private
-  **`#transcripts`** channel together with an embed (🎫 ticket, 👤 opened by, 🔒 closed by,
-  💬 message count, ⏱️ duration, 🕒 opened at), and then **deletes the ticket channel** after a short
-  countdown. If the transcript cannot be saved the channel is kept so nothing is lost.
+  conversation as a Discord-styled **HTML transcript** (same number as the ticket,
+  `transcript-NNNN.html`), posts it into the single private **`#transcripts`** channel with an embed
+  (ticket, opened by, closed by, messages, duration, opened at) and a **View transcript** button, and
+  then **deletes the ticket channel** after a short countdown. If the transcript cannot be saved the
+  channel is kept so nothing is lost.
+- The transcript is **one self-contained page**: avatars, pictures people sent, custom emoji, embeds,
+  buttons, replies, forwards and reactions are inside it, so it still looks right after Discord's own
+  picture links expire and the ticket channel is gone. Times are shown in the viewer's own time zone.
+  Limits: 4 MB per picture and about 7 MB of pictures per page, the rest stay links.
+- With an **online link** configured (below), every ticket also gets its **own address**,
+  `https://…/t/<32 random characters>/index.html`, opened with the **View transcript** button, and the
+  same page is attached as a file when it fits into Discord's upload limit (8 MB).
 - `/add` gives someone access to a ticket.
 
 **Alerts.** Every new ticket is announced in the staff channel (`TICKET_NOTIFY_CHANNEL_ID`, pinging
 `TICKET_NOTIFY_ROLE_IDS`) and sent as a DM to the owner (`TICKET_NOTIFY_USER_ID`, default the manager).
 This only happens on the owner's own server (the one that has the channel, or that the owner owns), so
-other servers running the bot never reach them. After `/setup server` the `staff-news` channel it builds
-is used when the configured channel no longer exists.
+other servers running the bot never reach them (`GUILD_ID` counts as the owner server too). After
+`/setup server` the `staff-news` channel it builds is used when the configured channel no longer exists.
+If an alert cannot be delivered (the bot cannot post in the channel, the owner blocks DMs, a role does not
+exist), the server log says exactly why, and so does a check at every start. **`/ticketalert`** sends a
+test (nobody is pinged) and shows what worked.
 
 **Numbering survives a restart, and a lost database.** The counter is saved after every ticket. If
 `data/db.json` is ever gone, the bot reads the highest number still visible in the tickets category
@@ -114,6 +126,38 @@ cooldowns survive restarts.
 **Every server is independent.** Ticket numbers, the category, cooldowns and the staff role are all
 stored per server, so each server starts at `ticket-0001` and never interferes with another. (Only the Steam/FiveM account pools are shared, on purpose, so the same account can
 never be handed out twice anywhere.)
+
+### Online transcripts
+
+Pick **one** of these. With neither, transcripts stay attached files and there is no button.
+
+**A. Cloudflare R2 (recommended).** In the Cloudflare dashboard:
+1. **R2** → *Create bucket* (for example `transcripts`). Cloudflare may ask for a payment method to
+   switch R2 on; the free allowance (10 GB) is far more than transcripts need.
+2. Open the bucket → *Settings* → **Public Development URL** → *Enable*. Copy the `https://pub-….r2.dev` address
+   (a custom domain on the bucket works too and is better for heavy use).
+3. R2 overview → **Manage API tokens** → *Create API token* → permission **Object Read & Write**, limited to
+   that bucket. Copy the Access Key ID and the Secret Access Key (shown once). The **Account ID** is on the R2 overview page.
+4. Put them into `.env` and restart the bot:
+
+```
+R2_ACCOUNT_ID=…
+R2_BUCKET=transcripts
+R2_ACCESS_KEY_ID=…
+R2_SECRET_ACCESS_KEY=…
+R2_PUBLIC_URL=https://pub-….r2.dev
+```
+
+On start the bot prints `Transcript links: bucket transcripts (…)`. Any other S3 compatible storage works
+too (set `R2_ENDPOINT` instead of `R2_ACCOUNT_ID`).
+
+**B. The bot's own website.** With the role-gated website running (`WEB_ENABLED=true`, a reachable
+`WEB_PUBLIC_URL`) the bot stores the pages in `data/transcripts/` and serves them at
+`<WEB_PUBLIC_URL>/t/<token>/index.html`, no login needed. If the website does not start, links through it are switched off.
+
+Good to know: the 32 random characters are the only protection, so **anyone with a link can read that
+transcript** (the page tells search engines not to index it). Nothing is deleted automatically. If putting
+a page online fails, the ticket still closes, the file is attached and the server log says why.
 
 ### Server setup (`/setup server`)
 
@@ -367,6 +411,9 @@ src/
     cooldown.js          # per-user command cooldowns
     roleMemory.js        # auto role + remembered roles
     antinuke.js          # bans anyone who deletes too many channels
+    transcriptHtml.js    # the transcript page
+    transcriptMedia.js   # downloads the pictures into it
+    transcriptHost.js    # puts it online (R2 or the own website)
   commands/
     steam.js  fivem.js   # /steam  /5m
     refills.js refill5.js# /refills  /refill5
@@ -374,5 +421,7 @@ src/
     stats.js             # /stats (Rastrošan)
     autorole.js          # /aa (server owner sets the per-server auto role)
     antinuke.js          # /antinuke (status, on, off)
+    ban.js               # /ban (admins, with a reason)
+    ticketAlert.js       # /ticketalert (test the alerts)
 test/                    # unit tests
 ```

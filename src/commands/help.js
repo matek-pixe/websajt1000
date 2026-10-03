@@ -38,6 +38,7 @@ module.exports = {
             entry('OPEN TICKET', 'Open a ticket from the verification panel, one at a time per member'),
             entry('/close', 'Close the current ticket and save the transcript (the opener or staff)'),
             entry('/add', 'Add a member or role to the current ticket (staff only)'),
+            entry('/ticketalert', 'Send a test ticket alert and show what works (owner only)'),
             entry('/v', 'Post the verification panel with a ticket button (staff only)'),
           ]),
         ),
@@ -47,6 +48,7 @@ module.exports = {
             entry('/aa', 'Set the role every new member gets, or show it (owner only)'),
             entry('/f', 'Give or remove a role for every member (admins only)'),
             entry('/roles', 'Show the roles the bot remembers for a member, even after they left (staff only)'),
+            entry('/ban', 'Ban a member and record the reason (admins only)'),
           ]),
         ),
         field(

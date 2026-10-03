@@ -12,6 +12,8 @@ const {
   MessageReferenceType,
 } = require('discord.js');
 const { renderTranscriptHtml, formatSpan } = require('./transcriptHtml');
+const { inlineMedia } = require('./transcriptMedia');
+const { TranscriptHost } = require('./transcriptHost');
 const { card, field, mention, plural } = require('../ui');
 
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
@@ -19,6 +21,8 @@ function setOwn(obj, key, value) {
   Object.defineProperty(obj, key, { value, enumerable: true, writable: true, configurable: true });
 }
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+/** Largest file posted to Discord; bigger pages are only available through the link. */
+const ATTACH_LIMIT = 8_000_000;
 
 /** Embed colours. `blend` matches Discord's dark embed background so no side bar shows. */
 const TICKET_COLORS = Object.freeze({
@@ -84,9 +88,47 @@ const REPLY_TYPE = (MessageType && MessageType.Reply) ?? 19;
 const FORWARD_REF = (MessageReferenceType && MessageReferenceType.Forward) ?? 1;
 
 const plainAttachments = (coll) =>
-  coll ? [...coll.values()].map((a) => ({ name: a.name, url: a.url, contentType: a.contentType || '' })) : [];
+  coll ? [...coll.values()].map((a) => ({ name: a.name, url: a.url, contentType: a.contentType || '', size: a.size || 0 })) : [];
+
+/** Rich embeds as plain data: text, fields, colours and the pictures (their addresses, downloaded later). */
 const plainEmbeds = (list) =>
-  (list || []).map((e) => ({ title: e.title || '', description: e.description || '' })).filter((e) => e.title || e.description);
+  (list || [])
+    .map((e) => {
+      const pic = (x) => (x && (x.proxyURL || x.url)) || null;
+      return {
+        title: e.title || '',
+        description: e.description || '',
+        url: e.url || null,
+        color: typeof e.color === 'number' ? e.color : null,
+        author: e.author && e.author.name ? { name: e.author.name, iconUrl: e.author.proxyIconURL || e.author.iconURL || null } : null,
+        fields: (e.fields || []).map((f) => ({ name: f.name, value: f.value, inline: !!f.inline })),
+        footer: e.footer && e.footer.text ? { text: e.footer.text, iconUrl: e.footer.proxyIconURL || e.footer.iconURL || null } : null,
+        thumbnail: pic(e.thumbnail),
+        image: pic(e.image),
+        timestamp: e.timestamp ? new Date(e.timestamp).getTime() || null : null,
+      };
+    })
+    .filter((e) => e.title || e.description || e.fields.length || e.image || e.thumbnail || e.author || e.footer);
+
+/** Buttons of a message (labels only, they cannot be pressed in a transcript). */
+const plainComponents = (rows) =>
+  (rows || [])
+    .map((row) =>
+      ((row && row.components) || [])
+        .filter((c) => c.label || (c.emoji && c.emoji.name))
+        .map((c) => ({ label: c.label || '', style: c.style, emoji: c.emoji && !c.emoji.id ? c.emoji.name : '', url: c.url || null })),
+    )
+    .filter((row) => row.length);
+
+/** A colour that discord.js computes lazily; it must never be able to break a transcript. */
+const hex = (get) => {
+  try {
+    const c = typeof get === 'function' ? get() : get;
+    return c && c !== '#000000' ? c : null;
+  } catch {
+    return null;
+  }
+};
 
 /**
  * Turn a discord.js message into the plain shape the HTML renderer understands, including
@@ -97,21 +139,33 @@ function normalizeMessage(m) {
   const avatar =
     typeof author.displayAvatarURL === 'function' ? author.displayAvatarURL({ extension: 'png', size: 64 }) : author.avatar || null;
   const mentions = {};
+  const roleMentions = {};
+  const channelMentions = {};
   if (m.mentions && m.mentions.users) {
-    for (const u of m.mentions.users.values()) mentions[u.id] = u.username;
+    for (const u of m.mentions.users.values()) mentions[u.id] = u.globalName || u.username;
+  }
+  if (m.mentions && m.mentions.roles) {
+    for (const r of m.mentions.roles.values()) roleMentions[r.id] = { name: r.name, color: hex(() => r.hexColor) };
+  }
+  if (m.mentions && m.mentions.channels) {
+    for (const c of m.mentions.channels.values()) channelMentions[c.id] = c.name;
   }
 
   // reactions: unicode emoji by name, custom emoji by image url
   const reactions = [];
   if (m.reactions && m.reactions.cache) {
     for (const r of m.reactions.cache.values()) {
-      const e = r.emoji || {};
-      let url = null;
-      if (e.id) {
-        if (typeof e.imageURL === 'function') url = e.imageURL({ extension: e.animated ? 'gif' : 'png', size: 32 });
-        else if (e.url) url = e.url;
+      try {
+        const e = r.emoji || {};
+        let url = null;
+        if (e.id) {
+          if (typeof e.imageURL === 'function') url = e.imageURL({ extension: e.animated ? 'gif' : 'png', size: 32 });
+          else if (e.url) url = e.url;
+        }
+        reactions.push({ name: e.name || '', id: e.id || null, animated: !!e.animated, url, count: r.count || 0 });
+      } catch {
+        /* a reaction that cannot be read is left out, the rest of the transcript still gets saved */
       }
-      reactions.push({ name: e.name || '', id: e.id || null, animated: !!e.animated, url, count: r.count || 0 });
     }
   }
 
@@ -143,11 +197,16 @@ function normalizeMessage(m) {
       tag: author.tag || author.username || '',
       bot: !!author.bot,
       avatar,
+      color: hex(() => m.member && m.member.displayHexColor),
     },
     content: m.content || '',
     mentions,
+    roleMentions,
+    channelMentions,
     attachments: plainAttachments(m.attachments),
     embeds: plainEmbeds(m.embeds),
+    components: plainComponents(m.components),
+    stickers: m.stickers ? [...m.stickers.values()].map((st) => ({ name: st.name, url: st.url || null })) : [],
     reactions,
     replyTo,
     forwarded,
@@ -199,6 +258,12 @@ class TicketService {
     this.closing = new Set();
     /** guilds whose ticket counter was already checked against Discord since the bot started */
     this.synced = new Set();
+    /** set by the app: (guild, text, title) => void, reports a problem to the server log */
+    this.onProblem = null;
+    /** puts finished transcripts online (R2 or the bot's own website); tests inject their own */
+    this.host = new TranscriptHost(config.transcripts || {});
+    /** test hook: replaces fetch when downloading the images of a transcript */
+    this.mediaFetch = null;
   }
 
   _guild(guildId) {
@@ -428,23 +493,85 @@ class TicketService {
     return built ? usable(guild.channels.cache.get(built)) : null;
   }
 
+  /** The owner's own server: it has the staff channel, is owned by the alert user or is the GUILD_ID server. */
+  _isHome(guild) {
+    const n = this.opts.notify || {};
+    if (this._notifyChannel(guild)) return true;
+    if (n.userId && guild.ownerId === n.userId) return true;
+    return !!(this.config.guildId && guild.id === this.config.guildId);
+  }
+
+  /** A failed alert in plain words, with what to do about it. */
+  _why(err, what) {
+    const code = err && err.code;
+    if (code === 50007) return `Discord would not let me DM ${what}. In their privacy settings, allow direct messages from server members.`;
+    if (code === 50001 || code === 50013) return `I am not allowed to post in ${what}. Give me View Channel, Send Messages and Embed Links there.`;
+    return `${err && err.message ? err.message : 'unknown error'} (${what})`;
+  }
+
+  _problem(guild, text, title = 'Ticket alert failed') {
+    console.warn(`[35xw] ${title.toLowerCase()}: ${text}`);
+    if (typeof this.onProblem === 'function') {
+      try {
+        this.onProblem(guild, text, title);
+      } catch {
+        /* the report must never break anything */
+      }
+    }
+  }
+
+  /** What is wrong with the alert setup of this server right now (empty list = fine). */
+  alertProblems(guild) {
+    const n = this.opts.notify || {};
+    if (!this._isHome(guild)) return [];
+    const out = [];
+    const target = this._notifyChannel(guild);
+    const me = guild.members && guild.members.me;
+    if (!target) {
+      out.push(`The staff channel ${n.channelId ? mention.channel(n.channelId) : ''} was not found on this server, so only the DM is sent.`.replace('  ', ' '));
+    } else if (me && typeof target.permissionsFor === 'function') {
+      const perms = target.permissionsFor(me);
+      const need = [
+        ['ViewChannel', 'View Channel'],
+        ['SendMessages', 'Send Messages'],
+        ['EmbedLinks', 'Embed Links'],
+      ].filter(([flag]) => perms && !perms.has(PermissionFlagsBits[flag]));
+      if (need.length) out.push(`I cannot post in ${mention.channel(target.id)}: missing ${need.map(([, label]) => label).join(', ')}.`);
+    }
+    const canPingAll = !!(me && me.permissions && me.permissions.has(PermissionFlagsBits.MentionEveryone));
+    for (const id of n.roleIds || []) {
+      const role = guild.roles.cache.get(id);
+      if (!role) out.push(`The role ${mention.role(id)} (${id}) does not exist on this server, so it is not pinged.`);
+      else if (!role.mentionable && !canPingAll) out.push(`${mention.role(id)} cannot be pinged: make it mentionable, or give me Mention Everyone.`);
+    }
+    return out;
+  }
+
   /**
    * Tell the team a ticket was opened: one message in the staff channel (pinging the configured
    * roles) and a DM to the owner. Only for the owner's own server, never for other servers that
-   * run the bot. Never throws.
+   * run the bot. Never throws. Anything that fails is reported once to the server log.
+   * With { test: true } nobody is pinged and the message says so (used by /ticketalert).
+   * Returns { skipped, staff, dm } where staff and dm are { ok, error? } or null when not attempted.
    */
-  async notifyOpened(guild, member, channel, number) {
+  async notifyOpened(guild, member, channel, number, { test = false } = {}) {
+    const report = { skipped: null, staff: null, dm: null, roles: [] };
     try {
       const n = this.opts.notify || {};
+      if (!this._isHome(guild)) {
+        report.skipped = 'not the owner server';
+        return report;
+      }
       const target = this._notifyChannel(guild);
-      if (!target && !(n.userId && guild.ownerId === n.userId)) return;
-
       const roleIds = (n.roleIds || []).filter((id) => guild.roles.cache.has(id));
+      report.roles = roleIds;
       const embed = card({
-        title: 'New ticket',
-        description: `${mention.user(member.id)} opened ${mention.channel(channel.id)}.`,
+        title: test ? 'Test ticket alert' : 'New ticket',
+        description: test
+          ? `${mention.user(member.id)} ran a test. Nobody was pinged.`
+          : `${mention.user(member.id)} opened ${mention.channel(channel.id)}.`,
         fields: [
-          field('Ticket', `#${pad4(number)}`, true),
+          field('Ticket', test ? 'test' : `#${pad4(number)}`, true),
           field('Member', member.user.tag || member.user.username || member.id, true),
           field('Server', guild.name, true),
         ],
@@ -453,22 +580,43 @@ class TicketService {
         timestamp: true,
       });
 
+      const send = async (what, fn) => {
+        try {
+          await fn();
+          return { ok: true };
+        } catch (err) {
+          const error = this._why(err, what);
+          this._problem(guild, error);
+          return { ok: false, error };
+        }
+      };
+
       const jobs = [];
       if (target) {
+        const ping = test ? [] : roleIds;
+        const label = mention.channel(target.id);
         jobs.push(
-          target.send({
-            content: roleIds.map(mention.role).join(' ') || undefined,
-            embeds: [embed],
-            allowedMentions: { roles: roleIds, users: [] },
-          }),
+          send(label, () =>
+            target.send({
+              content: roleIds.map(mention.role).join(' ') || undefined,
+              embeds: [embed],
+              allowedMentions: { roles: ping, users: [] },
+            }),
+          ).then((r) => (report.staff = r)),
         );
+      } else {
+        report.staff = { ok: false, error: `The staff channel ${n.channelId} was not found on this server.` };
+        this._problem(guild, report.staff.error);
       }
-      if (n.userId && guild.client && guild.client.users) jobs.push(guild.client.users.send(n.userId, { embeds: [embed] }));
-      const results = await Promise.allSettled(jobs);
-      for (const r of results) if (r.status === 'rejected') console.warn(`[35xw] ticket alert failed: ${r.reason && r.reason.message}`);
+      if (n.userId && guild.client && guild.client.users) {
+        jobs.push(send(mention.user(n.userId), () => guild.client.users.send(n.userId, { embeds: [embed] })).then((r) => (report.dm = r)));
+      }
+      await Promise.all(jobs);
     } catch (err) {
       console.warn(`[35xw] ticket alert failed: ${err.message}`);
+      report.skipped = report.skipped || err.message;
     }
+    return report;
   }
 
   // ---- open ----
@@ -551,7 +699,9 @@ class TicketService {
       if (batch.size < 100) break;
     }
     all.sort((a, b) => a.createdTimestamp - b.createdTimestamp);
-    return all.map(normalizeMessage);
+    // Join notices, pin notices and the like carry nothing worth keeping.
+    const real = (m) => m.type === undefined || [0, 19, 20, 23].includes(m.type) || m.content || (m.embeds && m.embeds.length) || (m.attachments && m.attachments.size);
+    return all.filter(real).map(normalizeMessage);
   }
 
   /** Build the HTML transcript and post it (with a summary embed) into the transcripts channel. */
@@ -559,19 +709,56 @@ class TicketService {
     const messages = await this.fetchMessages(channel);
     const guild = channel.guild;
     const closerName = closer.username || closer.tag || closer.id;
-    const html = renderTranscriptHtml({
-      ticket,
-      ticketName: formatTicketName(ticket.number),
-      guildName: guild.name,
-      messages,
-      closedBy: { id: closer.id, name: closerName },
-      closedAt,
+    const guildIcon = typeof guild.iconURL === 'function' ? guild.iconURL({ extension: 'png', size: 128 }) : null;
+
+    // Pictures go inside the page: Discord's own links expire and the ticket channel is about to be deleted.
+    const { media } = await inlineMedia(
+      { guildIcon, messages },
+      { ...(this.mediaFetch ? { fetchImpl: this.mediaFetch } : {}), ...(this.opts.media || {}) },
+    ).catch((err) => {
+      console.warn(`[35xw] transcript pictures skipped: ${err.message}`);
+      return { media: new Map() };
     });
-    const file = new AttachmentBuilder(Buffer.from(html, 'utf8'), { name: `${formatTranscriptName(ticket.number)}.html` });
+    const page = (withMedia) =>
+      renderTranscriptHtml({
+        ticket,
+        ticketName: formatTicketName(ticket.number),
+        guildName: guild.name,
+        guildIcon,
+        messages,
+        closedBy: { id: closer.id, name: closerName },
+        closedAt,
+        media: withMedia ? media : new Map(),
+      });
+    let html = page(true);
+
+    // Online copy: its own address per ticket.
+    let link = null;
+    if (this.host.enabled()) {
+      try {
+        link = (await this.host.publish(html)).url;
+      } catch (err) {
+        this._problem(guild, `The transcript of ${formatTicketName(ticket.number)} could not be put online (${err.message}). It is attached as a file instead.`, 'Transcript link failed');
+      }
+    }
+
+    // The file is attached when Discord accepts its size. Without a link it must always be attached, so
+    // a transcript that is too big loses its pictures instead of being lost.
+    let attach = Buffer.byteLength(html) <= ATTACH_LIMIT;
+    if (!attach && !link) {
+      html = page(false);
+      attach = true;
+    }
+
+    const description = link
+      ? attach
+        ? 'Open the transcript online with the button, or download the attached **.html** file. Both include the pictures.'
+        : 'Open the transcript online with the button. It is too large to attach as a file.'
+      : 'Open the attached **.html** file in a browser to read the full conversation.';
     const embed = new EmbedBuilder()
       .setColor(TICKET_COLORS.transcript)
       .setTitle(`📄 Transcript for ${formatTicketName(ticket.number)}`)
-      .setDescription('Open the attached **.html** file in a browser to read the full conversation.')
+      .setDescription(description)
       .addFields(
         { name: 'Ticket', value: formatTicketName(ticket.number), inline: true },
         { name: 'Opened by', value: `<@${ticket.userId}>`, inline: true },
@@ -583,9 +770,17 @@ class TicketService {
       .setFooter({ text: '35xw · tickets' })
       .setTimestamp(closedAt);
 
+    const payload = { embeds: [embed] };
+    if (attach) payload.files = [new AttachmentBuilder(Buffer.from(html, 'utf8'), { name: `${formatTranscriptName(ticket.number)}.html` })];
+    if (link) {
+      payload.components = [
+        new ActionRowBuilder().addComponents(new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('View transcript').setEmoji('📄').setURL(link)),
+      ];
+    }
+
     const target = await this.ensureTranscriptChannel(guild);
-    await target.send({ embeds: [embed], files: [file] });
-    return { channel: target, count: messages.length };
+    await target.send(payload);
+    return { channel: target, count: messages.length, url: link };
   }
 
   // ---- close ----
@@ -639,7 +834,7 @@ class TicketService {
       await channel.delete(`Ticket closed by ${closer.tag || closer.id}`).catch((err) =>
         console.warn(`[35xw] could not delete ${channel.name}: ${err.message}`),
       );
-      return { ok: true, ticket: t, transcriptChannel: saved.channel, count: saved.count };
+      return { ok: true, ticket: t, transcriptChannel: saved.channel, count: saved.count, url: saved.url };
     } finally {
       this.closing.delete(channel.id);
     }

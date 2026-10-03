@@ -139,4 +139,22 @@ const config = {
   },
 };
 
+// Online transcripts: one unguessable link per ticket. A Cloudflare R2 bucket wins when it is configured,
+// otherwise the bot's own website serves them (needs WEB_ENABLED and WEB_PUBLIC_URL).
+config.transcripts = {
+  s3: {
+    endpoint: (env.R2_ENDPOINT || (env.R2_ACCOUNT_ID ? `https://${env.R2_ACCOUNT_ID.trim()}.r2.cloudflarestorage.com` : '')).trim(),
+    bucket: (env.R2_BUCKET || '').trim(),
+    accessKeyId: (env.R2_ACCESS_KEY_ID || '').trim(),
+    secretAccessKey: (env.R2_SECRET_ACCESS_KEY || '').trim(),
+    region: (env.R2_REGION || 'auto').trim(),
+    // Public address of the bucket, e.g. https://pub-xxxxxxxx.r2.dev or your own domain.
+    publicUrl: (env.R2_PUBLIC_URL || '').trim().replace(/\/+$/, ''),
+  },
+  local: {
+    dir: path.join(config.dataDir, 'transcripts'),
+    publicUrl: config.web.enabled ? config.web.publicUrl : '',
+  },
+};
+
 module.exports = config;
