@@ -35,6 +35,12 @@ function defaults() {
     // setup.<guildId> = { roles: { verified, staff, coowner, sensitive, blank }, channels: { key: id }, updatedAt }
     //   -> what /setup created or adopted, so a re-run repairs the same channels instead of duplicating.
     setup: {},
+    // locks.<guildId>.<channelId> = { at, by, overwrites, added } -> the channel as it was before /lock,
+    //   so /unlock puts back exactly that.
+    locks: {},
+    // sos.<guildId> = { active, phase, startedAt, startedBy, snapshot, added, stripped, backupFile, failed }
+    //   -> the whole server as it was before /sos start. Kept until /sos end has put everything back.
+    sos: {},
   };
 }
 
@@ -74,6 +80,8 @@ function sanitize(data) {
   if (!isPlainObject(data.settings.bypassUsers)) data.settings.bypassUsers = {};
   if (!isPlainObject(data.settings.antiNuke)) data.settings.antiNuke = {};
   if (!isPlainObject(data.setup)) data.setup = {};
+  if (!isPlainObject(data.locks)) data.locks = {};
+  if (!isPlainObject(data.sos)) data.sos = {};
   return data;
 }
 

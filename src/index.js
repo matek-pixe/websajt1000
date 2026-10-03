@@ -13,6 +13,7 @@ const { SetupService } = require('./services/setup');
 const { card, deny, lines, COPY } = require('./ui');
 const { LogService } = require('./services/logs');
 const { AntiNukeService } = require('./services/antinuke');
+const { LockdownService } = require('./services/lockdown');
 const { refusal, isOwnerOrManager: ownerOrManager } = require('./gates');
 const { Cooldown } = require('./services/cooldown');
 const { createWebServer } = require('./web/server');
@@ -192,6 +193,10 @@ logs.attach();
 // A ticket alert that could not be delivered shows up in the server log, where it is easy to notice.
 tickets.onProblem = (guild, text, title) =>
   logs.post(guild, card({ title: title || 'Ticket alert failed', description: text, tone: 'danger', footer: 'tickets', timestamp: true }));
+
+// /lock, /unlock and /sos write permissions straight to the API, so the saved copies are bit for bit exact.
+const lockdown = new LockdownService({ storage, config, rest: client.rest });
+services.lockdown = lockdown;
 
 const antiNuke = new AntiNukeService({ client, storage, config, logs });
 services.antiNuke = antiNuke;

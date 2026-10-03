@@ -19,6 +19,9 @@ gives everyone an **auto role** on join, **remembers each member's roles** by th
 | `/antinuke [mode]` | **server owner** | Shows or switches the anti-nuke protection of this server (on by default). See *Anti-nuke* below. |
 | `/aa` | **server owner** | Sets the role every new member gets on **this** server, e.g. `/aa @Member`. Run with no role to see the current setting. |
 | `/f role` | **admins** | Gives a role to **every member** of the server (bots skipped unless `bots:true`). `action:Remove` takes it away from everyone. Shows progress and a summary. |
+| `/lock` | **admins** | Locks the channel it is written in: only admins and the server owner can write there, everyone else cannot. Posts a **Channel locked** card. |
+| `/unlock` | **admins** | Opens a channel locked with `/lock` and puts its permissions back exactly as they were. |
+| `/sos start` · `/sos end` · `/sos status` | **server owner** | Emergency button. `start` saves the whole server, then hides every channel from everyone except the owner. `end` puts every channel and role back exactly as it was and proves it. See *Lock and SOS* below. |
 | `/ban user [reason]` | **admins** | Bans a member (or a user id that already left) and writes the reason, with the admin's name, into the audit log. The target must sit below the admin and the bot in the role list. |
 | `/ticketalert` | **server owner** | Sends a test ticket alert (nobody is pinged) and shows what arrived and what did not, with the fix. |
 | `/roles` | **staff** | Shows the roles the bot remembers for a user (`user:` or paste an `id:` of someone who left) and whether it can restore them, with the reason if not. |
@@ -35,7 +38,7 @@ gives everyone an **auto role** on join, **remembers each member's roles** by th
   `/setup server`). The manager, people with bypass, the server owner and admins always pass. On a server
   where no VERIFIED role is known yet (no `/setup server`, and the `.env` id does not exist there) those
   commands stay open to everyone.
-- **server owner** commands (`/n`, `/setup server`, `/antinuke`) also work for the manager, but for no admin.
+- **server owner** commands (`/n`, `/setup server`, `/antinuke`, `/sos`) also work for the manager, but for no admin.
 - Every command has a **30‑second cooldown per user** (configurable via `COOLDOWN_SECONDS`).
 - Account replies are **ephemeral** – only the person who ran the command can see the account.
 - The **manager** is the only person allowed to refill accounts or hand out bypass. The manager is
@@ -133,6 +136,44 @@ cooldowns survive restarts.
 **Every server is independent.** Ticket numbers, the category, cooldowns and the staff role are all
 stored per server, so each server starts at `ticket-0001` and never interferes with another. (Only the Steam/FiveM account pools are shared, on purpose, so the same account can
 never be handed out twice anywhere.)
+
+### Lock and SOS
+
+Both change permissions straight through Discord's API, on the raw numbers, and both save the original first,
+so putting it back is exact to the bit.
+
+**`/lock`** denies writing (messages, messages in threads, new threads) for everyone in the channel it is run in.
+Admins and the server owner write regardless (Administrator ignores overwrites). Roles that had an explicit
+"may write" lose it too. The bot keeps its own access so it can answer. The channel's old overwrites are saved;
+`/unlock` writes exactly those back. A second `/lock` never replaces the saved copy, and a failed lock is
+rolled back.
+
+**`/sos start`** (owner only) does this, in this order:
+1. **Scan.** It reads every channel's overwrites and every role, and shows a preview: how many channels are public
+   or restricted, what would change, which Administrator roles would be lowered, which cannot be touched. A
+   `sos-scan.txt` file lists, per channel, who can see it today, and what each role is for. Nothing is changed.
+2. **Confirm.** Only the owner's *Start SOS* button goes on. The scan is read again at that moment, so what is saved
+   is the server as it is right then.
+3. **Save.** The whole state is written to `data/sos/sos-<server>-<time>.json` **and** to `db.json` before the first
+   change, and the same file is sent to the owner by DM. A second `/sos start` is refused, it can never replace the
+   first copy.
+4. **Hide.** In every channel and category, every overwrite that lets someone see it is switched to a deny,
+   `@everyone` is denied, and nobody else is added. Only the **owner**, the **manager** and the **bot** keep seeing
+   everything. Roles with **Administrator** are lowered to the same permissions without it until `/sos end`
+   (`keep_admins:true` leaves them alone). Roles above the bot's role and other bots' roles cannot be edited by
+   me: the preview names them, and members with them still see everything.
+
+**`/sos end`** puts roles back first, then every channel, writing back exactly the saved numbers and deleting only
+what SOS itself added (something somebody else added meanwhile is left). Then it **reads every channel and the
+changed roles from Discord again and compares them with the saved copy**; only when they are identical does SOS
+switch itself off. If anything could not be put back, SOS stays on, says what, and `/sos end` can simply be run
+again. A deleted channel or role cannot come back and is listed. If the database is ever lost, attach the `.json`
+file from the DM: `/sos end backup:<file>`. `/sos status` shows whether it is on.
+
+Good to know: channels created while SOS is on are not covered; people sitting in voice channels are
+disconnected; Community servers may refuse to hide their rules and updates channels; permission edits made by
+others while SOS is on are reverted by `/sos end`. The server log is muted for the run and gets one line at the
+start and one at the end. The bot needs **Administrator**, or **Manage Roles** and **Manage Channels**.
 
 ### Online transcripts
 
@@ -419,6 +460,8 @@ src/
     cooldown.js          # per-user command cooldowns
     roleMemory.js        # auto role + remembered roles
     antinuke.js          # bans anyone who deletes too many channels
+    overwrites.js        # exact permission maths for /lock and /sos
+    lockdown.js          # /lock and /sos: save, apply, restore, verify
     transcriptHtml.js    # the transcript page
     transcriptMedia.js   # downloads the pictures into it
     transcriptHost.js    # puts it online (R2 or the own website)
@@ -430,6 +473,8 @@ src/
     autorole.js          # /aa (server owner sets the per-server auto role)
     antinuke.js          # /antinuke (status, on, off)
     ban.js               # /ban (admins, with a reason)
+    lock.js unlock.js    # /lock  /unlock
+    sos.js               # /sos start | end | status
     ticketAlert.js       # /ticketalert (test the alerts)
 test/                    # unit tests
 ```

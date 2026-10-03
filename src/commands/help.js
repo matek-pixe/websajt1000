@@ -49,6 +49,8 @@ module.exports = {
             entry('/f', 'Give or remove a role for every member (admins only)'),
             entry('/roles', 'Show the roles the bot remembers for a member, even after they left (staff only)'),
             entry('/ban', 'Ban a member and record the reason (admins only)'),
+            entry('/lock', 'Lock this channel so only admins and the owner can write (admins only)'),
+            entry('/unlock', 'Open a channel that was locked with /lock (admins only)'),
           ]),
         ),
         field(
@@ -56,6 +58,7 @@ module.exports = {
           lines([
             entry('/setup server', 'Rebuild the server layout and roles after a preview and a confirmation'),
             entry('/n', 'Delete every channel except zavrseno after a confirmation'),
+            entry('/sos', 'Emergency: save the server, hide every channel from everyone but the owner, restore with /sos end'),
             entry('/antinuke', 'Show or switch the anti-nuke protection that bans mass channel deleters'),
           ]),
         ),

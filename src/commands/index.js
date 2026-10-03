@@ -17,6 +17,9 @@ const modules = [
   require('./setup'),
   require('./antinuke'),
   require('./ban'),
+  require('./lock'),
+  require('./unlock'),
+  require('./sos'),
   require('./help'),
   // ticket system
   require('./verify'),
