@@ -12,7 +12,7 @@ const {
   MessageReferenceType,
 } = require('discord.js');
 const { renderTranscriptHtml, formatSpan } = require('./transcriptHtml');
-const { mention, plural } = require('../ui');
+const { card, field, mention, plural } = require('../ui');
 
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
 function setOwn(obj, key, value) {
@@ -197,6 +197,8 @@ class TicketService {
     this.creating = new Set();
     /** channels whose close is in progress (blocks a double Close) */
     this.closing = new Set();
+    /** guilds whose ticket counter was already checked against Discord since the bot started */
+    this.synced = new Set();
   }
 
   _guild(guildId) {
@@ -373,6 +375,102 @@ class TicketService {
     return ch;
   }
 
+  // ---- numbering ----
+
+  /**
+   * The highest ticket number Discord itself still shows: the open ticket channels and the saved
+   * transcripts, both inside the tickets category. The counter lives in data/db.json, but if that
+   * file is ever lost (a wiped host, a fresh install) the numbers must not start over at 0001.
+   */
+  async _highestSeen(guild, category) {
+    let max = 0;
+    const note = (name) => {
+      const m = /^(?:ticket|transcript)-(\d{1,9})(?!\d)/.exec(String(name || ''));
+      if (m) max = Math.max(max, Number(m[1]));
+    };
+    const inside = [...guild.channels.cache.values()].filter((c) => c.parentId === category.id);
+    for (const c of inside) note(c.name);
+    const transcripts = inside.find((c) => c.name === this.opts.transcriptChannelName && c.messages && typeof c.messages.fetch === 'function');
+    if (transcripts) {
+      const recent = await transcripts.messages.fetch({ limit: 100 }).catch(() => null);
+      if (recent) {
+        for (const msg of recent.values()) {
+          if (msg.attachments) for (const a of msg.attachments.values()) note(a.name);
+        }
+      }
+    }
+    return max;
+  }
+
+  /** Raise the stored counter to what Discord shows. Runs once per guild and start; never lowers it. */
+  async _syncCounter(guild, category) {
+    if (this.synced.has(guild.id)) return;
+    const b = this._guild(guild.id);
+    const seen = await this._highestSeen(guild, category);
+    if (seen > b.counter) {
+      console.log(`[35xw] tickets: counter ${b.counter} raised to ${seen} (found in Discord), numbering continues from there.`);
+      b.counter = seen;
+      this.storage.save();
+    }
+    this.synced.add(guild.id);
+  }
+
+  // ---- notify ----
+
+  /** Channel that gets the "new ticket" message: the configured one, else the staff-news channel /setup built. */
+  _notifyChannel(guild) {
+    const n = this.opts.notify || {};
+    const usable = (c) => (c && typeof c.send === 'function' ? c : null);
+    const direct = n.channelId ? usable(guild.channels.cache.get(n.channelId)) : null;
+    if (direct) return direct;
+    const all = this.storage.data.setup;
+    const built = hasOwn(all, guild.id) && all[guild.id].channels ? all[guild.id].channels.staff_news : null;
+    return built ? usable(guild.channels.cache.get(built)) : null;
+  }
+
+  /**
+   * Tell the team a ticket was opened: one message in the staff channel (pinging the configured
+   * roles) and a DM to the owner. Only for the owner's own server, never for other servers that
+   * run the bot. Never throws.
+   */
+  async notifyOpened(guild, member, channel, number) {
+    try {
+      const n = this.opts.notify || {};
+      const target = this._notifyChannel(guild);
+      if (!target && !(n.userId && guild.ownerId === n.userId)) return;
+
+      const roleIds = (n.roleIds || []).filter((id) => guild.roles.cache.has(id));
+      const embed = card({
+        title: 'New ticket',
+        description: `${mention.user(member.id)} opened ${mention.channel(channel.id)}.`,
+        fields: [
+          field('Ticket', `#${pad4(number)}`, true),
+          field('Member', member.user.tag || member.user.username || member.id, true),
+          field('Server', guild.name, true),
+        ],
+        tone: 'brand',
+        footer: 'tickets',
+        timestamp: true,
+      });
+
+      const jobs = [];
+      if (target) {
+        jobs.push(
+          target.send({
+            content: roleIds.map(mention.role).join(' ') || undefined,
+            embeds: [embed],
+            allowedMentions: { roles: roleIds, users: [] },
+          }),
+        );
+      }
+      if (n.userId && guild.client && guild.client.users) jobs.push(guild.client.users.send(n.userId, { embeds: [embed] }));
+      const results = await Promise.allSettled(jobs);
+      for (const r of results) if (r.status === 'rejected') console.warn(`[35xw] ticket alert failed: ${r.reason && r.reason.message}`);
+    } catch (err) {
+      console.warn(`[35xw] ticket alert failed: ${err.message}`);
+    }
+  }
+
   // ---- open ----
 
   /**
@@ -402,6 +500,7 @@ class TicketService {
       const category = await this.ensureCategory(guild);
 
       // Reserve the number first so it is never reused even if channel creation fails.
+      await this._syncCounter(guild, category);
       b.counter += 1;
       const number = b.counter;
       this.storage.save();
@@ -430,6 +529,7 @@ class TicketService {
       this.storage.save();
 
       await channel.send({ content: `<@${member.id}>`, embeds: [welcomeEmbed()], components: [closeRow()] });
+      this.notifyOpened(guild, member, channel, number); // fire and forget, never delays or breaks the ticket
       return { ok: true, channel, number };
     } finally {
       this.creating.delete(member.id);

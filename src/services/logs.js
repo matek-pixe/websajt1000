@@ -470,6 +470,21 @@ class LogService {
     }
   }
 
+  // ---- role memory ----
+
+  /** A returning member whose remembered roles could not all be given back: say which, and why. */
+  rolesNotRestored(member, skipped) {
+    const above = (skipped && skipped.aboveBot) || [];
+    const managed = (skipped && skipped.managed) || [];
+    const missing = (skipped && skipped.missing) || [];
+    if (!above.length && !managed.length && !missing.length) return false;
+    const fields = [field('Member', person(member.id), true)];
+    if (above.length) fields.push(field('Above my role, move my role higher', joinList(above.map((id) => mention.role(id)), { max: 8 })));
+    if (managed.length) fields.push(field('Managed by an integration', joinList(managed.map((id) => mention.role(id)), { max: 8 })));
+    if (missing.length) fields.push(field('Deleted since', plural(missing.length, 'role')));
+    return this.post(member.guild, card({ title: 'Roles not restored', description: 'This member came back, but some of their old roles could not be given back.', fields, tone: 'warn', footer: 'logs', timestamp: true }));
+  }
+
   // ---- bot commands ----
 
   /** One line for an admin command that was used, with its options. */

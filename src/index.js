@@ -12,6 +12,7 @@ const { BypassService } = require('./services/bypass');
 const { SetupService } = require('./services/setup');
 const { card, deny, COPY } = require('./ui');
 const { LogService } = require('./services/logs');
+const { AntiNukeService } = require('./services/antinuke');
 const { refusal, isOwnerOrManager: ownerOrManager } = require('./gates');
 const { Cooldown } = require('./services/cooldown');
 const { createWebServer } = require('./web/server');
@@ -183,9 +184,15 @@ const logs = new LogService(client, config.logs);
 services.logs = logs;
 logs.attach();
 
+const antiNuke = new AntiNukeService({ client, storage, config, logs });
+services.antiNuke = antiNuke;
+antiNuke.attach();
+
 client.once(Events.ClientReady, async (c) => {
   console.log(`[35xw] Logged in as ${c.user.tag} (${c.user.id})`);
   console.log(`[35xw] Manager: ${config.manager.username} (${config.manager.id}) | cooldown: ${config.cooldownMs / 1000}s`);
+  // If this says "new" after a restart, the host is not keeping the data folder: tickets, remembered roles and accounts would be lost.
+  console.log(`[35xw] Data: ${storage.file} (${storage.fresh ? 'new, nothing was saved before' : 'loaded'})`);
 
   // Register the slash commands automatically on startup so a separate `npm run deploy` is optional.
   await registerCommands(c);
@@ -309,6 +316,7 @@ client.on(Events.GuildMemberAdd, async (member) => {
     console.log(
       `[35xw] join: ${member.user.tag} -> restored ${res.applied.length} role(s)` + (notes.length ? ` | not restored: ${notes.join(', ')}` : ''),
     );
+    logs.rolesNotRestored(member, sk);
   } catch (err) {
     console.warn(`[35xw] join handler failed for ${member.id}: ${err.message}`);
   }

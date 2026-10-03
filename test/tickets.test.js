@@ -311,6 +311,138 @@ test('every server numbers its own tickets independently (each starts at ticket-
   }
 });
 
+test('numbering continues after the database was lost, using what Discord still shows', async () => {
+  const dirA = tmpDir();
+  const dirB = tmpDir();
+  try {
+    const g = mkGuild();
+    const before = new TicketService(new Storage(path.join(dirA, 'db.json')), CFG);
+    await before.createTicket(g, m('U1')); // ticket-0001 stays open
+    const tr = await before.ensureTranscriptChannel(g);
+    tr._history = [
+      { attachments: new Map([['a', { name: 'transcript-0007.html' }]]) },
+      { attachments: new Map([['b', { name: 'transcript-0005.html' }]]) },
+      { attachments: new Map() },
+    ];
+
+    // fresh bot, empty database (the host lost data/db.json)
+    const after = new TicketService(new Storage(path.join(dirB, 'db.json')), CFG);
+    assert.equal(after._guild('G').counter, 0);
+    const next = await after.createTicket(g, m('U2'));
+    assert.equal(next.channel.name, 'ticket-0008');
+    assert.equal(after._guild('G').counter, 8);
+    assert.equal((await after.createTicket(g, m('U3'))).channel.name, 'ticket-0009');
+  } finally {
+    rm(dirA);
+    rm(dirB);
+  }
+});
+
+test('the stored counter is never lowered by what Discord shows', async () => {
+  const dir = tmpDir();
+  try {
+    const storage = new Storage(path.join(dir, 'db.json'));
+    const svc = new TicketService(storage, CFG);
+    const g = mkGuild();
+    svc._guild('G').counter = 50;
+    assert.equal((await svc.createTicket(g, m('U1'))).channel.name, 'ticket-0051');
+  } finally {
+    rm(dir);
+  }
+});
+
+test('only the tickets category is read for numbers, other channels cannot inflate the counter', async () => {
+  const dir = tmpDir();
+  try {
+    const svc = new TicketService(new Storage(path.join(dir, 'db.json')), CFG);
+    const g = mkGuild();
+    g._store.set('X', { id: 'X', name: 'ticket-9999', type: 0, parentId: 'ELSEWHERE' });
+    assert.equal((await svc.createTicket(g, m('U1'))).channel.name, 'ticket-0001');
+  } finally {
+    rm(dir);
+  }
+});
+
+function notifyKit(over = {}) {
+  const dir = tmpDir();
+  const storage = new Storage(path.join(dir, 'db.json'));
+  const cfg = { ...CFG, tickets: { ...CFG.tickets, notify: { userId: 'OWNER', channelId: 'NEWS', roleIds: ['R1', 'R2', 'GONE'], ...over } } };
+  const svc = new TicketService(storage, cfg);
+  const g = mkGuild('G');
+  g.ownerId = 'OWNER';
+  g.roles.cache = new Map([['R1', {}], ['R2', {}]]);
+  const posted = [];
+  const dms = [];
+  g._store.set('NEWS', { id: 'NEWS', name: 'staff-news', type: 0, send: async (p) => posted.push(p) });
+  g.client = { users: { send: async (id, p) => dms.push({ id, p }) } };
+  return { svc, g, posted, dms, storage, done: () => rm(dir) };
+}
+
+test('a new ticket pings the roles in the staff channel and DMs the owner', async () => {
+  const k = notifyKit();
+  try {
+    const r = await k.svc.createTicket(k.g, m('U1'));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(r.ok, true);
+    assert.equal(k.posted.length, 1);
+    assert.equal(k.posted[0].content, '<@&R1> <@&R2>'); // GONE does not exist here, so it is left out
+    assert.deepEqual(k.posted[0].allowedMentions, { roles: ['R1', 'R2'], users: [] });
+    const e = k.posted[0].embeds[0].toJSON();
+    assert.equal(e.title, 'New ticket');
+    assert.match(e.description, new RegExp(`<@U1> opened <#${r.channel.id}>`));
+    assert.equal(e.fields.find((f) => f.name === 'Ticket').value, '#0001');
+    assert.equal(k.dms.length, 1);
+    assert.equal(k.dms[0].id, 'OWNER');
+    assert.equal(k.dms[0].p.embeds[0].toJSON().title, 'New ticket');
+  } finally {
+    k.done();
+  }
+});
+
+test('other servers never reach the owner: no staff channel and not owned by them means no alert', async () => {
+  const k = notifyKit();
+  try {
+    const other = mkGuild('H');
+    other.ownerId = 'SOMEONE';
+    other.client = k.g.client;
+    await k.svc.createTicket(other, m('U1'));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(k.posted.length, 0);
+    assert.equal(k.dms.length, 0);
+  } finally {
+    k.done();
+  }
+});
+
+test('after /setup server the staff-news channel it built is used', async () => {
+  const k = notifyKit({ channelId: 'DELETED-LONG-AGO' });
+  try {
+    k.g._store.set('NEW-NEWS', { id: 'NEW-NEWS', name: 'staff-news', type: 0, send: async (p) => k.posted.push(p) });
+    k.storage.data.setup.G = { roles: {}, channels: { staff_news: 'NEW-NEWS' }, keep: [] };
+    await k.svc.createTicket(k.g, m('U1'));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(k.posted.length, 1);
+  } finally {
+    k.done();
+  }
+});
+
+test('a failing alert never breaks the ticket', async () => {
+  const k = notifyKit();
+  try {
+    k.g._store.get('NEWS').send = async () => {
+      throw new Error('Missing Access');
+    };
+    k.g.client = { users: { send: async () => { throw new Error('Cannot send messages to this user'); } } };
+    const r = await k.svc.createTicket(k.g, m('U1'));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(r.ok, true);
+    assert.equal(r.channel.name, 'ticket-0001');
+  } finally {
+    k.done();
+  }
+});
+
 test('bypass lets the manager ignore the one-open-ticket rule and the cooldown', async () => {
   const dir = tmpDir();
   try {

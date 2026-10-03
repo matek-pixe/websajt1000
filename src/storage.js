@@ -29,8 +29,9 @@ function defaults() {
     //   tickets: { <channelId>: {...} }, users: { <userId>: { lastClosedAt } } }
     tickets: {},
     // settings.bypass = true while the manager's /b "no limits" mode is switched on;
-    // settings.bypassUsers.<userId> = { by, at } for people the manager gave bypass to.
-    settings: { bypass: false, bypassUsers: {} },
+    // settings.bypassUsers.<userId> = { by, at } for people the manager gave bypass to;
+    // settings.antiNuke.<guildId> = false when the owner switched anti-nuke off there (on otherwise).
+    settings: { bypass: false, bypassUsers: {}, antiNuke: {} },
     // setup.<guildId> = { roles: { verified, staff, coowner, sensitive, blank }, channels: { key: id }, updatedAt }
     //   -> what /setup created or adopted, so a re-run repairs the same channels instead of duplicating.
     setup: {},
@@ -71,6 +72,7 @@ function sanitize(data) {
   if (!isPlainObject(data.settings)) data.settings = {};
   if (typeof data.settings.bypass !== 'boolean') data.settings.bypass = false;
   if (!isPlainObject(data.settings.bypassUsers)) data.settings.bypassUsers = {};
+  if (!isPlainObject(data.settings.antiNuke)) data.settings.antiNuke = {};
   if (!isPlainObject(data.setup)) data.setup = {};
   return data;
 }
@@ -81,6 +83,8 @@ class Storage {
    */
   constructor(file) {
     this.file = file;
+    /** true when there was no database file yet (first start, or the file was lost) */
+    this.fresh = false;
     this.data = this._load();
   }
 
@@ -89,7 +93,10 @@ class Storage {
     try {
       raw = fs.readFileSync(this.file, 'utf8');
     } catch (err) {
-      if (err.code === 'ENOENT') return defaults();
+      if (err.code === 'ENOENT') {
+        this.fresh = true;
+        return defaults();
+      }
       throw err;
     }
 
@@ -105,6 +112,7 @@ class Storage {
         /* best effort */
       }
       console.error(`[storage] ${this.file} could not be parsed (${err.message}). Backed up to ${backup} and starting fresh.`);
+      this.fresh = true;
       return defaults();
     }
   }

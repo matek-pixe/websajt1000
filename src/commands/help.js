@@ -54,6 +54,7 @@ module.exports = {
           lines([
             entry('/setup server', 'Rebuild the server layout and roles after a preview and a confirmation'),
             entry('/n', 'Delete every channel except zavrseno after a confirmation'),
+            entry('/antinuke', 'Show or switch the anti-nuke protection that bans mass channel deleters'),
           ]),
         ),
         field(

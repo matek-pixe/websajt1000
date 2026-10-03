@@ -15,6 +15,7 @@ const modules = [
   require('./massrole'),
   require('./roles'),
   require('./setup'),
+  require('./antinuke'),
   require('./help'),
   // ticket system
   require('./verify'),

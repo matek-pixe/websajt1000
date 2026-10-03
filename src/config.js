@@ -66,6 +66,22 @@ const config = {
     reopenCooldownMs: positiveNumber(env.TICKET_REOPEN_COOLDOWN_MINUTES, 10) * 60 * 1000,
     // Countdown between "closed" and the channel actually being deleted.
     deleteDelayMs: 5000,
+    // Every new ticket is announced to this user (DM) and in this channel, pinging these roles.
+    // Only servers that have the channel (or are owned by this user) are announced, so other
+    // servers running the bot never reach the owner.
+    notify: {
+      userId: (env.TICKET_NOTIFY_USER_ID || env.MANAGER_ID || '1143659003327553556').trim(),
+      channelId: (env.TICKET_NOTIFY_CHANNEL_ID || '1554450101802639431').trim(),
+      roleIds: listOf(env.TICKET_NOTIFY_ROLE_IDS || '1000782828402917406,1012461646972727347,1003360702016278543,1000784296463835286'),
+    },
+  },
+
+  // Anti-nuke: whoever deletes more than maxChannels channels within windowMs is warned by DM and
+  // banned. The server owner, the manager, this bot and trustedIds are never touched.
+  antiNuke: {
+    maxChannels: positiveNumber(env.ANTINUKE_MAX_CHANNELS, 3),
+    windowMs: positiveNumber(env.ANTINUKE_WINDOW_MINUTES, 10) * 60 * 1000,
+    trustedIds: listOf(env.ANTINUKE_TRUSTED_IDS),
   },
 
   // /setup server: rebuilds the whole server layout. The ids are defaults for the owner's own

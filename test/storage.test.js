@@ -66,3 +66,16 @@ test('missing keys in an old db are filled from defaults', () => {
     rm(dir);
   }
 });
+
+test('fresh tells a new database from a loaded one', () => {
+  const dir = tmpDir();
+  try {
+    const file = path.join(dir, 'db.json');
+    const first = new Storage(file);
+    assert.equal(first.fresh, true);
+    first.save();
+    assert.equal(new Storage(file).fresh, false);
+  } finally {
+    rm(dir);
+  }
+});

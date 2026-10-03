@@ -16,6 +16,7 @@ gives everyone an **auto role** on join, **remembers each member's roles** by th
 | `/help` | **verified** | Lists every command and how to use it. |
 | `/stats` | **verified** | Posts the **Rastrošan** embed: member count + top `/steam` and top `/5m` users (separately). |
 | `/setup server` | **server owner** | Rebuilds the whole server layout and roles after a preview and a confirmation. Keeps `osjetljivo`, the tickets category, the `+` role and other protected roles. See *Server setup* below. |
+| `/antinuke [mode]` | **server owner** | Shows or switches the anti-nuke protection of this server (on by default). See *Anti-nuke* below. |
 | `/aa` | **server owner** | Sets the role every new member gets on **this** server, e.g. `/aa @Member`. Run with no role to see the current setting. |
 | `/f role` | **admins** | Gives a role to **every member** of the server (bots skipped unless `bots:true`). `action:Remove` takes it away from everyone. Shows progress and a summary. |
 | `/roles` | **staff** | Shows the roles the bot remembers for a user (`user:` or paste an `id:` of someone who left) and whether it can restore them, with the reason if not. |
@@ -32,7 +33,7 @@ gives everyone an **auto role** on join, **remembers each member's roles** by th
   `/setup server`). The manager, people with bypass, the server owner and admins always pass. On a server
   where no VERIFIED role is known yet (no `/setup server`, and the `.env` id does not exist there) those
   commands stay open to everyone.
-- **server owner** commands (`/n`, `/setup server`) also work for the manager, but for no admin.
+- **server owner** commands (`/n`, `/setup server`, `/antinuke`) also work for the manager, but for no admin.
 - Every command has a **30‑second cooldown per user** (configurable via `COOLDOWN_SECONDS`).
 - Account replies are **ephemeral** – only the person who ran the command can see the account.
 - The **manager** is the only person allowed to refill accounts or hand out bypass. The manager is
@@ -62,7 +63,8 @@ to assign it; `/aa` warns you if it doesn't.
 - The bot only restores roles it is actually allowed to assign (not managed roles, and only roles
   **below its own highest role**). If someone comes back without their roles, run `/roles` on them:
   it lists what is remembered and flags roles that sit above the bot's role, which is the usual cause.
-  The join log prints the same breakdown.
+  The join log prints the same breakdown, and the server log channel gets a **Roles not restored**
+  line naming the roles it could not give back.
 - **Moderation note:** a plain **kick** does not stop role memory — a kicked member who rejoins gets
   their old roles back. To permanently strip someone, **ban** them: a ban clears their remembered
   roles so a later rejoin starts clean.
@@ -93,6 +95,17 @@ manager always can).
   💬 message count, ⏱️ duration, 🕒 opened at), and then **deletes the ticket channel** after a short
   countdown. If the transcript cannot be saved the channel is kept so nothing is lost.
 - `/add` gives someone access to a ticket.
+
+**Alerts.** Every new ticket is announced in the staff channel (`TICKET_NOTIFY_CHANNEL_ID`, pinging
+`TICKET_NOTIFY_ROLE_IDS`) and sent as a DM to the owner (`TICKET_NOTIFY_USER_ID`, default the manager).
+This only happens on the owner's own server (the one that has the channel, or that the owner owns), so
+other servers running the bot never reach them. After `/setup server` the `staff-news` channel it builds
+is used when the configured channel no longer exists.
+
+**Numbering survives a restart, and a lost database.** The counter is saved after every ticket. If
+`data/db.json` is ever gone, the bot reads the highest number still visible in the tickets category
+(open `ticket-NNNN` channels and the `transcript-NNNN.html` files in `#transcripts`) and continues from
+there instead of starting again at `0001`.
 
 A ticket keeps **one number for its whole life** (`ticket-0007` → `transcript-0007.html`), so tickets
 and transcripts can never get mixed up. All ticket state lives in the database, so numbering and
@@ -207,6 +220,23 @@ invites and webhooks, server changes and the bot's own admin commands.
   When the bot starts it posts "Logging is on" there, so you know it works.
 - `LOGS_ENABLED=false` turns it off, `LOG_VOICE=false` stops the voice lines.
 
+### Anti-nuke
+
+On by default on every server. Whoever **deletes more than 3 channels within 10 minutes** is sent a
+private message signed *Anti-nuke system made by 35bf* and is then **banned**. The owner (and the
+manager, if they are on the server) gets a DM about it and the server log gets a line. If the ban is not
+possible, the same messages say why (usually: my role must be above theirs, and I need Ban Members).
+
+- **Never touched:** the server owner, the bot manager, the bot itself and `ANTINUKE_TRUSTED_IDS`.
+  Deletions made by the bot (`/n`, `/setup server`, closing tickets) are not counted.
+- `/antinuke` shows the state and whether the bot has **Ban Members** and **View Audit Log**;
+  `/antinuke mode:Off` / `mode:On` switches it for the server. The switch is saved.
+- Settings: `ANTINUKE_MAX_CHANNELS` (3) and `ANTINUKE_WINDOW_MINUTES` (10).
+- A staff member who really needs to delete several channels should be added to
+  `ANTINUKE_TRUSTED_IDS`, or the owner switches the protection off for that moment. Other bots count
+  too, so a bot that cleans up many channels needs the same.
+- A banned member's remembered roles are cleared, so rejoining after an unban starts clean.
+
 ### Website gated by a Discord role
 
 The bot can also serve a website that only members with a certain role can open. Visitors click
@@ -308,6 +338,10 @@ All state lives in `DATA_DIR` (default `./data`):
 - `db.json` – pools, the given‑accounts registry, per‑user usage counts, and role memory.
 - `steam.txt` / `fivem.txt` – the most recent uploaded files.
 
+When the bot starts it prints `Data: … (loaded)` or `(new, nothing was saved before)`. If it says
+**new** after a restart, the host is not keeping the data folder, and tickets, remembered roles and the
+account pools would be lost: use a host with persistent storage.
+
 The `data/` folder and your `.env` are git‑ignored. **Never commit them** – they contain accounts
 and your bot token.
 
@@ -332,11 +366,13 @@ src/
     accounts.js          # account pools (never-repeat), refills, usage stats
     cooldown.js          # per-user command cooldowns
     roleMemory.js        # auto role + remembered roles
+    antinuke.js          # bans anyone who deletes too many channels
   commands/
     steam.js  fivem.js   # /steam  /5m
     refills.js refill5.js# /refills  /refill5
     nuke.js              # /n (delete all channels, keep "zavrseno")
     stats.js             # /stats (Rastrošan)
     autorole.js          # /aa (server owner sets the per-server auto role)
+    antinuke.js          # /antinuke (status, on, off)
 test/                    # unit tests
 ```

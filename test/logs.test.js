@@ -401,3 +401,17 @@ test('pure helpers: permission differences, change lines and channel type names'
   assert.equal(typeName(ChannelType.GuildVoice), 'Voice channel');
   assert.equal(typeName(999), 'Channel');
 });
+
+test('a returning member whose roles could not all be restored is reported, a clean return is not', async () => {
+  const t = mk();
+  const member = { id: 'U9', guild: t.guild };
+  assert.equal(t.logs.rolesNotRestored(member, { aboveBot: [], managed: [], missing: [] }), false);
+  assert.equal(t.logs.rolesNotRestored(member, undefined), false);
+  assert.equal(t.logs.rolesNotRestored(member, { aboveBot: ['R1'], managed: [], missing: ['R2', 'R3'] }), true);
+  await t.logs.flush();
+  const e = t.last();
+  assert.equal(e.title, 'Roles not restored');
+  assert.equal(t.val(e, 'Member'), '<@U9> `U9`');
+  assert.equal(t.val(e, 'Above my role, move my role higher'), '<@&R1>');
+  assert.equal(t.val(e, 'Deleted since'), '2 roles');
+});
