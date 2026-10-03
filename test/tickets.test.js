@@ -866,7 +866,7 @@ const imageReply = (size = 8) => ({
   })(),
 });
 
-async function closeWith({ host, mediaFetch, media }) {
+async function closeWith({ host, mediaFetch, media, dm }) {
   const dir = tmpDir();
   const svc = new TicketService(new Storage(path.join(dir, 'db.json')), { ...CFG, tickets: { ...CFG.tickets, ...(media ? { media } : {}) } });
   if (host) svc.host = host;
@@ -874,6 +874,8 @@ async function closeWith({ host, mediaFetch, media }) {
   const problems = [];
   svc.onProblem = (guild, text, title) => problems.push({ text, title });
   const g = mkGuild();
+  const dms = [];
+  g.client = { users: { send: dm || (async (id, payload) => dms.push({ id, payload })) } };
   const r = await svc.createTicket(g, m('U2'));
   r.channel._history = [
     {
@@ -887,7 +889,7 @@ async function closeWith({ host, mediaFetch, media }) {
   ];
   const res = await svc.closeTicket(r.channel, { id: 'S', username: 'staff', tag: 'staff' });
   const post = [...g._store.values()].find((c) => c.name === 'transcripts').sent[0];
-  return { res, post, problems, dir };
+  return { res, post, problems, dir, dms };
 }
 
 /** A stand-in for TranscriptHost#session that records what is stored. */
@@ -1110,5 +1112,75 @@ test('alerts: another server is skipped quietly', async () => {
     assert.equal(k.problems.length, 0);
   } finally {
     k.done();
+  }
+});
+
+// ---------- the opener gets the transcript too ----------
+
+test('close: the person who opened the ticket gets literally the same message by DM', async () => {
+  const host = fakeHost();
+  const { post, dms, res, dir } = await closeWith({ host, mediaFetch: async () => imageReply() });
+  try {
+    assert.equal(res.ok, true);
+    assert.equal(dms.length, 1);
+    assert.equal(dms[0].id, 'U2', 'the opener, not the person who closed it');
+    const sent = dms[0].payload;
+    assert.deepEqual(sent.embeds[0].toJSON(), post.embeds[0].toJSON(), 'same card');
+    assert.equal(sent.files[0].name, post.files[0].name);
+    assert.deepEqual(Buffer.from(sent.files[0].attachment), Buffer.from(post.files[0].attachment), 'same file, byte for byte');
+    assert.deepEqual(sent.components[0].toJSON(), post.components[0].toJSON(), 'same View transcript button');
+    assert.notEqual(sent.files[0], post.files[0], 'two separate file objects');
+    assert.deepEqual(res.dm, { ok: true });
+  } finally {
+    rm(dir);
+  }
+});
+
+test('close: without an online link the DM still carries the file, exactly like the channel message', async () => {
+  const { post, dms, dir } = await closeWith({ mediaFetch: async () => imageReply() });
+  try {
+    assert.equal(dms.length, 1);
+    assert.equal(dms[0].payload.components, undefined);
+    assert.deepEqual(Buffer.from(dms[0].payload.files[0].attachment), Buffer.from(post.files[0].attachment));
+  } finally {
+    rm(dir);
+  }
+});
+
+test('close: a member with closed DMs still gets their ticket closed, and the server log says who did not get it', async () => {
+  const blocked = async () => {
+    throw Object.assign(new Error('Cannot send messages to this user'), { code: 50007 });
+  };
+  const { res, post, problems, dir } = await closeWith({ dm: blocked });
+  try {
+    assert.equal(res.ok, true, 'the ticket closes anyway');
+    assert.ok(post.files[0], 'the channel copy is there');
+    assert.equal(res.dm.ok, false);
+    assert.equal(problems[0].title, 'Transcript not delivered');
+    assert.match(problems[0].text, /<@U2>.*direct messages from server members turned off/);
+  } finally {
+    rm(dir);
+  }
+});
+
+test('close: if the channel copy cannot be saved nothing is sent to the opener, so a retry never sends it twice', async () => {
+  const dir = tmpDir();
+  try {
+    const svc = new TicketService(new Storage(path.join(dir, 'db.json')), CFG);
+    const g = mkGuild();
+    const dms = [];
+    g.client = { users: { send: async (id, p) => dms.push({ id, p }) } };
+    const r = await svc.createTicket(g, m('U2'));
+    const tr = await svc.ensureTranscriptChannel(g);
+    tr.send = async () => {
+      throw new Error('Missing Access');
+    };
+    const res = await svc.closeTicket(r.channel, { id: 'S', username: 'staff', tag: 'staff' });
+    assert.equal(res.ok, false);
+    assert.equal(res.reason, 'transcript_failed');
+    assert.equal(dms.length, 0);
+    assert.equal(r.channel.deleted, false, 'the ticket is kept');
+  } finally {
+    rm(dir);
   }
 });

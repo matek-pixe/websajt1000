@@ -766,17 +766,41 @@ class TicketService {
         { name: 'Opened', value: `<t:${Math.floor(ticket.openedAt / 1000)}:f>`, inline: true },
       );
 
-    const payload = { embeds: [embed] };
-    if (attach) payload.files = [new AttachmentBuilder(Buffer.from(html, 'utf8'), { name: `${formatTranscriptName(ticket.number)}.html` })];
-    if (link) {
-      payload.components = [
-        new ActionRowBuilder().addComponents(new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('View transcript').setEmoji('📄').setURL(link)),
-      ];
-    }
+    // The very same message goes to the transcripts channel and, as a direct message, to whoever opened
+    // the ticket. Built twice so the two sends never share one file object.
+    const makePayload = () => {
+      const payload = { embeds: [EmbedBuilder.from(embed)] };
+      if (attach) payload.files = [new AttachmentBuilder(Buffer.from(html, 'utf8'), { name: `${formatTranscriptName(ticket.number)}.html` })];
+      if (link) {
+        payload.components = [
+          new ActionRowBuilder().addComponents(new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('View transcript').setEmoji('📄').setURL(link)),
+        ];
+      }
+      return payload;
+    };
 
     const target = await this.ensureTranscriptChannel(guild);
-    await target.send(payload);
-    return { channel: target, count: messages.length, url: link };
+    await target.send(makePayload());
+
+    // Only after the channel copy is safe: a failed save is retried, and the opener must not get it twice.
+    const dm = await this._sendToOpener(guild, ticket, makePayload());
+    return { channel: target, count: messages.length, url: link, dm };
+  }
+
+  /** Direct message to the person who opened the ticket. Never throws; a closed DM is reported to the server log. */
+  async _sendToOpener(guild, ticket, payload) {
+    if (!ticket.userId || !guild.client || !guild.client.users) return { ok: false, error: 'no way to send' };
+    try {
+      await guild.client.users.send(ticket.userId, payload);
+      return { ok: true };
+    } catch (err) {
+      const error =
+        err && err.code === 50007
+          ? `Discord would not let me DM the transcript of ${formatTicketName(ticket.number)} to ${mention.user(ticket.userId)}. They have direct messages from server members turned off.`
+          : `The transcript of ${formatTicketName(ticket.number)} could not be sent to ${mention.user(ticket.userId)} (${(err && err.message) || 'unknown error'}).`;
+      this._problem(guild, error, 'Transcript not delivered');
+      return { ok: false, error };
+    }
   }
 
   // ---- close ----
@@ -830,7 +854,7 @@ class TicketService {
       await channel.delete(`Ticket closed by ${closer.tag || closer.id}`).catch((err) =>
         console.warn(`[35xw] could not delete ${channel.name}: ${err.message}`),
       );
-      return { ok: true, ticket: t, transcriptChannel: saved.channel, count: saved.count, url: saved.url };
+      return { ok: true, ticket: t, transcriptChannel: saved.channel, count: saved.count, url: saved.url, dm: saved.dm };
     } finally {
       this.closing.delete(channel.id);
     }

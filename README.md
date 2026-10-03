@@ -99,6 +99,9 @@ manager always can).
   (ticket, opened by, closed by, messages, duration, opened at) and a **View transcript** button, and
   then **deletes the ticket channel** after a short countdown. If the transcript cannot be saved the
   channel is kept so nothing is lost.
+- The person who **opened the ticket gets the same message by DM** (card, file and **View transcript**
+  button, literally what goes into `#transcripts`), whoever closed it. It is sent only after the channel copy is
+  saved. If their DMs are closed the ticket still closes and the server log says who did not get it.
 - The transcript is **one self-contained page**: avatars, pictures people sent, custom emoji, embeds,
   buttons, replies, forwards and reactions are inside it, so it still looks right after Discord's own
   picture links expire and the ticket channel is gone. Times are shown in the viewer's own time zone.
