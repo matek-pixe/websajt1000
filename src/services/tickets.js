@@ -750,15 +750,9 @@ class TicketService {
       attach = true;
     }
 
-    const description = link
-      ? attach
-        ? 'Open the transcript online with the button, or download the attached **.html** file. Both include the pictures.'
-        : 'Open the transcript online with the button. It is too large to attach as a file.'
-      : 'Open the attached **.html** file in a browser to read the full conversation.';
     const embed = new EmbedBuilder()
       .setColor(TICKET_COLORS.transcript)
       .setTitle(`📄 Transcript for ${formatTicketName(ticket.number)}`)
-      .setDescription(description)
       .addFields(
         { name: 'Ticket', value: formatTicketName(ticket.number), inline: true },
         { name: 'Opened by', value: `<@${ticket.userId}>`, inline: true },
@@ -766,9 +760,7 @@ class TicketService {
         { name: 'Messages', value: String(messages.length), inline: true },
         { name: 'Duration', value: formatSpan(closedAt - ticket.openedAt), inline: true },
         { name: 'Opened', value: `<t:${Math.floor(ticket.openedAt / 1000)}:f>`, inline: true },
-      )
-      .setFooter({ text: '35xw · tickets' })
-      .setTimestamp(closedAt);
+      );
 
     const payload = { embeds: [embed] };
     if (attach) payload.files = [new AttachmentBuilder(Buffer.from(html, 'utf8'), { name: `${formatTranscriptName(ticket.number)}.html` })];

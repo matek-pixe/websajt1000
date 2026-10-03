@@ -209,7 +209,9 @@ test('close: saves the HTML transcript to the single #transcripts channel, then 
     assert.equal(field('Closed by'), '<@S>');
     assert.equal(field('Messages'), '2');
     assert.equal(embed.title, '📄 Transcript for ticket-0002');
-    assert.equal(embed.footer.text, '35xw · tickets');
+    assert.equal(embed.description, undefined, 'no description line');
+    assert.equal(embed.footer, undefined, 'no footer and no timestamp');
+    assert.equal(embed.timestamp, undefined);
 
     // ticket channel deleted, record gone, cooldown started, other ticket untouched
     assert.equal(r2.channel.deleted, true);
@@ -903,7 +905,7 @@ test('close: with a host the transcript message gets a View transcript button, t
     assert.equal(post.files[0].name, 'transcript-0001.html');
     assert.ok(attached.includes('data:image/png;base64,'), 'pictures are inside the file');
     assert.equal(published[0], attached, 'the online page and the file are the same page');
-    assert.match(post.embeds[0].toJSON().description, /online with the button.*attached/);
+    assert.equal(post.embeds[0].toJSON().description, undefined);
   } finally {
     rm(dir);
   }
@@ -914,7 +916,7 @@ test('close: without a host there is no button, and a failed upload still leaves
   try {
     assert.equal(plain.post.components, undefined);
     assert.ok(plain.post.files[0]);
-    assert.match(plain.post.embeds[0].toJSON().description, /attached \*\*\.html\*\* file/);
+    assert.equal(plain.post.embeds[0].toJSON().description, undefined);
   } finally {
     rm(plain.dir);
   }
@@ -939,7 +941,7 @@ test('close: a page too big for Discord is link only with a host, and loses its 
   try {
     assert.equal(withHost.post.files, undefined, 'too large to attach');
     assert.ok(withHost.post.components[0]);
-    assert.match(withHost.post.embeds[0].toJSON().description, /too large to attach/);
+    assert.equal(withHost.post.embeds[0].toJSON().footer, undefined);
   } finally {
     rm(withHost.dir);
   }
