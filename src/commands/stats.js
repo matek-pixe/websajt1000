@@ -36,7 +36,7 @@ module.exports = {
     const bots = cached.filter((m) => m.user && m.user.bot).length;
     const boosters = cached.filter((m) => m.premiumSince).length;
 
-    const verifiedId = ctx.setup ? ctx.setup.getVerifiedRoleId(guild) : null;
+    const verifiedId = ctx.verified ? ctx.verified.getVerifiedRoleId(guild) : null;
     const verifiedRole = verifiedId ? guild.roles.cache.get(verifiedId) : null;
     const members = [`**${num(total)}**`, `${num(Math.max(0, total - bots))} people, ${num(bots)} bots`];
     if (verifiedRole) members.push(`${num(verifiedRole.members.size)} verified`);

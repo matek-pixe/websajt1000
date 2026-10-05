@@ -5,11 +5,10 @@ const { Client, GatewayIntentBits, Partials, Events, MessageFlags } = require('d
 
 const config = require('./config');
 const { Storage } = require('./storage');
-const { AccountService } = require('./services/accounts');
 const { RoleMemoryService } = require('./services/roleMemory');
 const { TicketService } = require('./services/tickets');
 const { BypassService } = require('./services/bypass');
-const { SetupService } = require('./services/setup');
+const { VerifiedService } = require('./services/verified');
 const { card, deny, lines, COPY } = require('./ui');
 const { LogService } = require('./services/logs');
 const { AntiNukeService } = require('./services/antinuke');
@@ -31,15 +30,14 @@ if (!config.clientId) fail('CLIENT_ID is missing. Set it in .env.');
 
 // ---- services ----
 const storage = new Storage(path.join(config.dataDir, 'db.json'));
-const accounts = new AccountService(storage, config.dataDir);
 const roleMemory = new RoleMemoryService(storage, config.autoRole);
 const tickets = new TicketService(storage, config);
 const bypass = new BypassService(storage, config);
-const setup = new SetupService(storage, config, tickets, roleMemory);
+const verified = new VerifiedService(storage, config);
 const cooldown = new Cooldown(config.cooldownMs);
 setInterval(() => cooldown.sweep(), 60_000).unref();
 
-const services = { config, storage, accounts, roleMemory, tickets, bypass, setup, cooldown };
+const services = { config, storage, roleMemory, tickets, bypass, verified, cooldown };
 
 /**
  * Coalesce bursts of database writes into one. A mass role change on a big server fires
@@ -232,6 +230,14 @@ client.once(Events.ClientReady, async (c) => {
   }
   let logged = 0;
   for (const guild of c.guilds.cache.values()) if (logs.announce(guild)) logged += 1;
+  // The anti-nuke needs to ban and to read the audit log; say so at once if it cannot.
+  for (const guild of c.guilds.cache.values()) {
+    const h = antiNuke.health(guild);
+    const missing = [...(h.canBan ? [] : ['Ban Members']), ...(h.canSeeAudit ? [] : ['View Audit Log'])];
+    if (!missing.length) continue;
+    console.warn(`[35xw] ${guild.name}: the anti-nuke cannot work, I am missing ${missing.join(' and ')}.`);
+    logs.post(guild, card({ title: 'Anti-nuke cannot work', description: `I am missing ${missing.join(' and ')}. Give me the permission, or nobody gets banned for deleting channels.`, tone: 'danger', footer: 'anti-nuke', timestamp: true }));
+  }
   for (const guild of c.guilds.cache.values()) {
     const problems = tickets.alertProblems(guild);
     if (!problems.length) continue;
@@ -279,7 +285,7 @@ async function handleCommand(interaction) {
 
   const why = refusal(command, interaction, {
     isManager,
-    verifiedGate: (i) => setup.verifiedGate(i.guild, i.member, i.user, { isManager, isBypass: (u) => bypass.applies(u) }),
+    verifiedGate: (i) => verified.verifiedGate(i.guild, i.member, i.user, { isManager, isBypass: (u) => bypass.applies(u) }),
   });
   if (why) return deny(interaction, why);
 

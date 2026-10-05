@@ -64,27 +64,17 @@ const config = {
     },
   },
 
-  // Anti-nuke: whoever deletes more than maxChannels channels within windowMs is warned by DM and
-  // banned. The server owner, the manager, this bot and trustedIds are never touched.
+  // Anti-nuke (always on): whoever deletes banAt channels within windowMs is told, the staff channel is
+  // alerted, and they are banned. The server owner, the manager, this bot and trustedIds are never touched.
   antiNuke: {
-    maxChannels: positiveNumber(env.ANTINUKE_MAX_CHANNELS, 3),
+    banAt: positiveNumber(env.ANTINUKE_BAN_AT, 2),
     windowMs: positiveNumber(env.ANTINUKE_WINDOW_MINUTES, 10) * 60 * 1000,
     trustedIds: listOf(env.ANTINUKE_TRUSTED_IDS),
   },
 
-  // /setup server: rebuilds the whole server layout. The ids are defaults for the owner's own
-  // server. Roles listed here (and the + role, and the website roles) are never deleted.
-  setup: {
-    verifiedRoleId: (env.SETUP_VERIFIED_ROLE_ID || '1545185363327193228').trim(),
-    sensitiveRoleId: (env.SETUP_SENSITIVE_ROLE_ID || '1000782828402917406').trim(),
-    // Name of the voice channel pinned at the top as a reminder of the website.
-    siteName: (env.SETUP_SITE_NAME || '35xw.top').trim() || '35xw.top',
-    // Categories that are never touched, with everything inside them (comma separated names).
-    keepCategories: listOf(env.SETUP_KEEP_CATEGORIES || 'osjetljivo'),
-    // Extra role ids that must never be deleted (comma separated).
-    protectedRoleIds: listOf(env.SETUP_PROTECTED_ROLE_IDS),
-    // How long the confirm buttons stay valid.
-    confirmTtlMs: 10 * 60 * 1000,
+  // Members with this role count as verified (the role staff hands out after a ticket).
+  verified: {
+    roleId: (env.VERIFIED_ROLE_ID || env.SETUP_VERIFIED_ROLE_ID || '1545185363327193228').trim(),
   },
 
   // Server log: one private channel that receives deleted messages (with who deleted them and

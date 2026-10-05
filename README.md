@@ -1,7 +1,7 @@
 # 35xw – Discord bot
 
 A Discord bot for a verified community server: a **ticket system** with HTML transcripts, a one-command
-**server setup**, an **anti-nuke** guard, **/lock** and the **/sos** emergency button, a **server log**, an **auto
+an **anti-nuke** guard, **/lock** and the **/sos** emergency button, a **server log**, an **auto
 role** on join with **role memory** (members keep their roles after they leave), a **/stats** card, and an optional
 Discord-gated **website**.
 
@@ -11,37 +11,24 @@ Discord-gated **website**.
 
 | Command | Who | What it does |
 | --- | --- | --- |
-| `/combo` | **verified** | Gives you one Steam **and** one FiveM account together, one below the other, each split into labelled lines (username / e-mail / password / extra). |
-| `/help` | **verified** | Lists every command and how to use it. |
 | `/stats` | **verified** | Shows the server: **members** (people, bots, verified), the **boost level** with the boosts and how many more the next level needs, open tickets, channels, roles, emoji and stickers, when the server was made and who owns it. |
-| `/setup server` | **server owner** | Rebuilds the whole server layout and roles after a preview and a confirmation. Keeps `osjetljivo`, the tickets category, the `+` role and other protected roles. See *Server setup* below. |
-| `/antinuke [mode]` | **server owner** | Shows or switches the anti-nuke protection of this server (on by default). See *Anti-nuke* below. |
 | `/lock` | **admins** | Locks the channel it is written in: only admins and the server owner can write there, everyone else cannot. Posts a **Channel locked** card. |
 | `/unlock` | **admins** | Opens a channel locked with `/lock` and puts its permissions back exactly as they were. |
 | `/sos start` · `/sos end` · `/sos status` | **server owner** | Emergency button. `start` saves the whole server, then hides every channel from everyone except the owner. `end` puts every channel and role back exactly as it was and proves it. See *Lock and SOS* below. |
 | `/ban user [reason]` | **admins** | Bans a member (or a user id that already left) and writes the reason, with the admin's name, into the audit log. The target must sit below the admin and the bot in the role list. |
-| `/ticketalert` | **server owner** | Sends a test ticket alert (nobody is pinged) and shows what arrived and what did not, with the fix. |
 | `/b [user] [mode]` | **manager only** | Bypass: exempt from every limit (command cooldowns, one-open-ticket rule, ticket cooldown). `/b` toggles your own; `/b user:@someone` gives it to (or takes it from) that person; `mode:on/off` sets it explicitly; `mode:List` shows who has it. Persisted across restarts. |
 | `/v [staff]` | **staff** | Posts the **35xw verification** panel with a 🎫 **OPEN TICKET** button. Optionally sets the staff role. |
 | `/close` | opener / staff | Closes the current ticket: saves the HTML transcript, then deletes the channel. |
 | `/add` | **staff** | Adds a user or role to the current ticket. |
 
-- **verified** = members holding the VERIFIED role (the role staff hands out after a ticket; see
-  `/setup server`). The manager, people with bypass, the server owner and admins always pass. On a server
-  where no VERIFIED role is known yet (no `/setup server`, and the `.env` id does not exist there) those
-  commands stay open to everyone.
-- **server owner** commands (`/setup server`, `/antinuke`, `/sos`) also work for the manager, but for no admin.
+- **verified** = members holding the VERIFIED role (`VERIFIED_ROLE_ID`, the role staff hands out after a ticket).
+  The manager, people with bypass, the server owner and admins always pass. On a server where no VERIFIED role
+  is known (the id does not exist there) those commands stay open to everyone.
+- **server owner** commands (`/sos`) also work for the manager, but for no admin.
 - Every command has a **30‑second cooldown per user** (configurable via `COOLDOWN_SECONDS`).
-- Account replies are **ephemeral** – only the person who ran the command can see the account.
 - The **manager** is the only person allowed to hand out bypass. The manager is
   identified by their Discord **user ID** (`1143659003327553556`, username `35bf`), which cannot
   be spoofed by changing a nickname.
-
-### How accounts never repeat
-
-Every account that is handed out is written into a permanent `given` registry keyed by the account
-line itself. `/combo` only ever takes from the pool of accounts that are **not** in that registry, so an
-account can only ever be handed to one person. There is no command to refill the pools any more.
 
 ### Auto role
 
@@ -105,11 +92,9 @@ manager always can).
 **Alerts.** Every new ticket is announced in the staff channel (`TICKET_NOTIFY_CHANNEL_ID`, pinging
 `TICKET_NOTIFY_ROLE_IDS`) and sent as a DM to the owner (`TICKET_NOTIFY_USER_ID`, default the manager).
 This only happens on the owner's own server (the one that has the channel, or that the owner owns), so
-other servers running the bot never reach them (`GUILD_ID` counts as the owner server too). After
-`/setup server` the `staff-news` channel it builds is used when the configured channel no longer exists.
-If an alert cannot be delivered (the bot cannot post in the channel, the owner blocks DMs, a role does not
-exist), the server log says exactly why, and so does a check at every start. **`/ticketalert`** sends a
-test (nobody is pinged) and shows what worked.
+other servers running the bot never reach them (`GUILD_ID` counts as the owner server too). If an alert cannot
+be delivered (the bot cannot post in the channel, the owner blocks DMs, a role does not exist), the server
+log says exactly why, and so does a check at every start.
 
 **Numbering survives a restart, and a lost database.** The counter is saved after every ticket. If
 `data/db.json` is ever gone, the bot reads the highest number still visible in the tickets category
@@ -121,8 +106,7 @@ and transcripts can never get mixed up. All ticket state lives in the database, 
 cooldowns survive restarts.
 
 **Every server is independent.** Ticket numbers, the category, cooldowns and the staff role are all
-stored per server, so each server starts at `ticket-0001` and never interferes with another. (Only the Steam/FiveM account pools are shared, on purpose, so the same account can
-never be handed out twice anywhere.)
+stored per server, so each server starts at `ticket-0001` and never interferes with another. 
 
 ### Lock and SOS
 
@@ -195,89 +179,6 @@ can never run on that address. Good to know: the 32 random characters are the on
 with a link can read that transcript and download its files** (the page tells search engines not to index it). Nothing is deleted automatically. If putting
 a page online fails, the ticket still closes, the file is attached and the server log says why.
 
-### Server setup (`/setup server`)
-
-`/setup server` replaces the server layout with the 35xw template. It is a rebuild, not a repair:
-everything that is not protected is deleted and created again. Because that cannot be undone, it
-works in two steps.
-
-1. **Preview.** The command lists what stays, what will be deleted, what will be created and who
-   gets access. Nothing has changed at this point. Only the server owner (and the bot manager) can
-   see it and press the buttons.
-2. **Confirm.** *Rebuild server* starts the work, *Cancel* drops it. The confirmation is single use
-   and expires after ten minutes.
-
-The order of work keeps a failure harmless: roles first, then **every new channel is built**, and
-only after that the old channels and roles from the preview are deleted. If building fails, the new
-channels are removed again and nothing old is deleted. Only what the preview listed is ever
-deleted, so a channel created after the preview survives.
-
-**What always stays**
-
-- The `osjetljivo` category with everything inside it, exactly as it is (name and permissions are
-  never edited). Add more with the `keep` option or `SETUP_KEEP_CATEGORIES`. If no such category
-  exists, the command refuses to run.
-- The tickets category with open tickets and `#transcripts`, so ticket history is never lost. The
-  ticket system needs it, so it is created when it does not exist yet.
-- The `+` role (matched by its exact name) and the verified role, the role that gives access to
-  `osjetljivo`, the website roles (`WEB_ROLE_ID`), the auto role, every role with Administrator,
-  managed roles and roles above the bot. Extra ids go in `SETUP_PROTECTED_ROLE_IDS`.
-- Channels Discord refuses to delete on Community servers (rules and updates).
-
-**What the template creates**
-
-| Where | What | Who sees it |
-| --- | --- | --- |
-| top | `🌐 ıl 35xw.top` (voice) | everyone, nobody can join, a reminder of the website |
-| `🔒 ıl PRIVATE` | `🔒・priv-chat`, `🔒 ıl PRIV` (voice) | the server owner, admin roles, every role above the lowest admin role, and the co-owner role |
-| `✅ ıl VERIFY` | `🎫・verify` with the **35xw verification** panel | everyone can read it and press the button; **hidden from verified members** |
-| `🎫 Tickets` | ticket channels and `#transcripts` | staff and admins; each ticket also shows to its opener |
-| `📌 ıl INFO` | `📜・rules`, `📢・announcements`, `🛠️・changelog`, `ℹ️・information`, `🛒・buy-triggers`, `🆗・joins` | verified members only, read only; staff can post |
-| `🌍 ıl GENERAL` | `💬・chat`, `🌍・balkan`, `🤖・cmds`, `🎮・gen`, `♾️・triggers`, `📢・server`, `🗑️・dump` | verified members |
-| `🔊 ıl VOICE` | `#1`, `#2`, `#3`, `🌍 ıl BALKAN`, `💤 ıl AFK` | verified members |
-| `💎 ıl VIP` | `💎・vip-chat`, `💎 ıl VIP VOICE` | the VIP role and staff |
-| `🛡️ ıl STAFF` | `📣・staff-news`, `💬・staff-chat`, `🚩・reports`, `📋・logs`, `🛡️ ıl STAFF VOICE` | the support role and the co-owner role |
-| last | `osjetljivo` | unchanged |
-
-Text channels use `・` in their names and are lowercase, because Discord lowercases text channel
-names and turns spaces into hyphens. Categories and voice channels keep the `icon ıl NAME` style.
-
-**Also protected, found by the review of this command:** roles that appear in the permission
-overwrites of a kept channel (deleting a role removes its overwrites, which would edit the kept
-category), the current ticket staff role when it has Administrator, and the server log channel,
-wherever it sits. The tickets category and `#transcripts` are looked up with one rule for both the
-preview and the run, and `#transcripts` is only ever taken from inside the tickets category.
-
-**What else it takes care of.** Invites belong to a channel and die with it, so the preview warns how
-many will stop working and the run creates one new permanent invite in the verify channel and prints
-it in the summary. If the AFK channel or the system messages channel were among the deleted ones,
-they are pointed at the new AFK voice channel and the new chat.
-
-**If something goes wrong.** Roles are set up first. If a role cannot be created, or building fails,
-everything the run created is removed again, renamed roles get their name back and nothing old is
-deleted, and the card lists anything it could not undo. Once the old layout is being removed, an
-error is reported as a partial rebuild. A second preview that is still open after a rebuild is
-refused. The result is shown in the reply, else sent as a direct message, else posted in the new
-priv chat.
-
-**Roles.** The verified role is, in this order: the one chosen with `verified`, the id in
-`SETUP_VERIFIED_ROLE_ID`, the role named `+`, the one from the last run, otherwise a new
-`✅ ıl VERIFIED`. It is never renamed. Roles named like the template ones are reused and renamed in
-place, so members keep them: `👑 ıl CO-OWNER`, `🎫 ıl SUPPORT` (this becomes the ticket staff role),
-`💎 ıl VIP`, `🤝 ıl FRIEND` and an invisible-named separator role that is not shown apart from
-members. Anything missing is created. They are stacked directly above the verified role. Priv access
-goes to the server owner, every role with Administrator, every role positioned above the lowest
-admin role and `👑 ıl CO-OWNER`, plus the `priv_role` you pass. The verified role, the `+` role, the
-auto role and the website roles are never given priv access, however high they sit. The preview
-lists exactly which roles qualify, and those roles are never deleted.
-
-**Options:** `verified`, `priv_role` (an extra role for the priv channels), `keep` (an extra category to keep) and `delete_roles`
-(`false` leaves every role alone).
-
-The bot needs **Administrator** (or Manage Channels and Manage Roles) and its role must sit above
-the roles it renames, deletes and reorders. If the channel the command ran in is deleted, the
-summary is sent to the owner as a direct message.
-
 ### Server log
 
 Everything that happens on the server is written to one private channel (`LOG_CHANNEL_ID`, default
@@ -293,8 +194,8 @@ invites and webhooks, server changes and the bot's own admin commands.
   Content Intent** switched on in the Developer Portal (Bot page). Without it the bot logs everything
   else and says "Not logged" for the text. Turning the flag on before the intent makes Discord refuse
   the login, so switch the intent on first.
-- **Quiet while it works.** `/setup server`, `/sos` and the other mass changes would create hundreds of lines, so the log
-  is muted for the guild while they run and gets one summary line instead.
+- **Quiet while it works.** `/sos` would create hundreds of lines, so the log
+  is muted for the guild while it runs and gets one summary line instead.
 - **Ticket channels** created and deleted by the bot are left out (the transcript covers them).
 - The bot needs to see and write in the channel and have **View Audit Log** (Administrator has it).
   When the bot starts it posts "Logging is on" there, so you know it works.
@@ -302,19 +203,23 @@ invites and webhooks, server changes and the bot's own admin commands.
 
 ### Anti-nuke
 
-On by default on every server. Whoever **deletes more than 3 channels within 10 minutes** is sent a
-private message signed *Anti-nuke system made by 35bf* and is then **banned**. The owner (and the
-manager, if they are on the server) gets a DM about it and the server log gets a line. If the ban is not
-possible, the same messages say why (usually: my role must be above theirs, and I need Ban Members).
+Always on, on every server. Whoever **deletes 2 channels within 10 minutes** is dealt with in this order:
+1. a **private message** to them, signed *Anti-nuke system made by 35bf*,
+2. an **alert in the staff channel** (`TICKET_NOTIFY_CHANNEL_ID`, pinging `TICKET_NOTIFY_ROLE_IDS`; the server
+   log channel if the server has no staff channel),
+3. the **ban**.
+
+Afterwards the owner (and the manager, if they are on the server) gets a DM and the server log gets a report.
+If the ban is not possible, the same messages say why (usually: my role must be above theirs, and I need
+Ban Members). The private message and the alert never hold the ban back for more than 3 seconds.
 
 - **Never touched:** the server owner, the bot manager, the bot itself and `ANTINUKE_TRUSTED_IDS`.
-  Deletions made by the bot (`/setup server`, closing tickets) are not counted.
-- `/antinuke` shows the state and whether the bot has **Ban Members** and **View Audit Log**;
-  `/antinuke mode:Off` / `mode:On` switches it for the server. The switch is saved.
-- Settings: `ANTINUKE_MAX_CHANNELS` (3) and `ANTINUKE_WINDOW_MINUTES` (10).
-- A staff member who really needs to delete several channels should be added to
-  `ANTINUKE_TRUSTED_IDS`, or the owner switches the protection off for that moment. Other bots count
-  too, so a bot that cleans up many channels needs the same.
+  Deletions made by the bot (closing tickets) are not counted.
+- There is no command and no switch. At every start the bot checks that it has **Ban Members** and
+  **View Audit Log**, and says so in the log channel if not.
+- Settings: `ANTINUKE_BAN_AT` (2) and `ANTINUKE_WINDOW_MINUTES` (10).
+- A staff member who really needs to delete channels should be added to `ANTINUKE_TRUSTED_IDS`. Other bots
+  count too, so a bot that cleans up many channels needs the same.
 - A banned member's remembered roles are cleared, so rejoining after an unban starts clean.
 
 ### Website gated by a Discord role
@@ -402,15 +307,15 @@ need to set the start command and hit start.
 
 All state lives in `DATA_DIR` (default `./data`):
 
-- `db.json` – tickets, role memory, the account pools for `/combo`, settings and the saved copies of `/lock` and `/sos`.
+- `db.json` – tickets, role memory, settings and the saved copies of `/lock` and `/sos`.
 - `sos/` – the backup file of every `/sos start`, and `transcripts/` when the own website hosts them.
 
 When the bot starts it prints `Data: … (loaded)` or `(new, nothing was saved before)`. If it says
-**new** after a restart, the host is not keeping the data folder, and tickets, remembered roles and the
-account pools would be lost: use a host with persistent storage.
+**new** after a restart, the host is not keeping the data folder, and tickets and remembered roles
+would be lost: use a host with persistent storage.
 
-The `data/` folder and your `.env` are git‑ignored. **Never commit them** – they contain accounts
-and your bot token.
+The `data/` folder and your `.env` are git‑ignored. **Never commit them** – they contain
+your bot token and your server's data.
 
 ---
 
@@ -430,7 +335,7 @@ src/
   deploy-commands.js     # registers slash commands with Discord
   storage.js             # atomic JSON database
   services/
-    accounts.js          # account pools (never-repeat) for /combo
+    verified.js          # who counts as verified
     cooldown.js          # per-user command cooldowns
     roleMemory.js        # auto role + remembered roles
     antinuke.js          # bans anyone who deletes too many channels
@@ -440,12 +345,9 @@ src/
     transcriptMedia.js   # downloads the pictures into it
     transcriptHost.js    # puts it online (R2 or the own website)
   commands/
-    combo.js             # /combo
     stats.js             # /stats (members, boost level, more)
-    antinuke.js          # /antinuke (status, on, off)
     ban.js               # /ban (admins, with a reason)
     lock.js unlock.js    # /lock  /unlock
     sos.js               # /sos start | end | status
-    ticketAlert.js       # /ticketalert (test the alerts)
 test/                    # unit tests
 ```

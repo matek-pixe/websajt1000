@@ -416,7 +416,7 @@ test('other servers never reach the owner: no staff channel and not owned by the
   }
 });
 
-test('after /setup server the staff-news channel it built is used', async () => {
+test('a staff-news channel saved for the server is used when the configured one is gone', async () => {
   const k = notifyKit({ channelId: 'DELETED-LONG-AGO' });
   try {
     k.g._store.set('NEW-NEWS', { id: 'NEW-NEWS', name: 'staff-news', type: 0, send: async (p) => k.posted.push(p) });
@@ -1071,7 +1071,7 @@ test('alerts: what is wrong is named, and other servers report nothing', () => {
   }
 });
 
-test('alerts: a test sends without pinging, reports each part and explains a blocked DM', async () => {
+test('alerts: each part is reported, a blocked DM is explained and goes to the server log', async () => {
   const k = alertKit({ notify: { roleIds: ['R1', 'R2'] } });
   try {
     const sent = [];
@@ -1082,13 +1082,13 @@ test('alerts: a test sends without pinging, reports each part and explains a blo
       err.code = 50007;
       throw err;
     };
-    const report = await k.svc.notifyOpened(k.g, m('U1'), { id: 'C1' }, 0, { test: true });
+    const report = await k.svc.notifyOpened(k.g, m('U1'), { id: 'C1' }, 4);
     assert.equal(report.staff.ok, true);
     assert.equal(report.dm.ok, false);
     assert.match(report.dm.error, /allow direct messages from server members/);
-    assert.deepEqual(sent[0].allowedMentions, { roles: [], users: [] }, 'a test pings nobody');
-    assert.equal(sent[0].content, '<@&R1> <@&R2>', 'but shows who would be pinged');
-    assert.equal(sent[0].embeds[0].toJSON().title, 'Test ticket alert');
+    assert.equal(sent[0].content, '<@&R1> <@&R2>');
+    assert.deepEqual(sent[0].allowedMentions, { roles: ['R1', 'R2'], users: [] });
+    assert.equal(sent[0].embeds[0].toJSON().title, 'New ticket');
     assert.deepEqual(report.roles, ['R1', 'R2']);
     assert.equal(k.problems.length, 1, 'the failure also goes to the server log');
 
@@ -1097,7 +1097,7 @@ test('alerts: a test sends without pinging, reports each part and explains a blo
       err.code = 50001;
       throw err;
     };
-    const again = await k.svc.notifyOpened(k.g, m('U1'), { id: 'C1' }, 0, { test: true });
+    const again = await k.svc.notifyOpened(k.g, m('U1'), { id: 'C1' }, 5);
     assert.match(again.staff.error, /not allowed to post in <#NEWS>.*View Channel, Send Messages and Embed Links/);
   } finally {
     k.done();

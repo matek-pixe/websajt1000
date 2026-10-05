@@ -3,21 +3,16 @@
 const { Collection } = require('discord.js');
 
 const modules = [
-  require('./combo'),
   require('./bypass'),
   require('./stats'),
-  require('./setup'),
-  require('./antinuke'),
   require('./ban'),
   require('./lock'),
   require('./unlock'),
   require('./sos'),
-  require('./help'),
   // ticket system
   require('./verify'),
   require('./ticketClose'),
   require('./ticketAdd'),
-  require('./ticketAlert'),
 ];
 
 /** name -> command module */

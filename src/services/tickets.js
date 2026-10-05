@@ -489,7 +489,7 @@ class TicketService {
 
   // ---- notify ----
 
-  /** Channel that gets the "new ticket" message: the configured one, else the staff-news channel /setup built. */
+  /** Channel that gets the "new ticket" message: the configured one, else the staff-news channel saved for the server earlier. */
   _notifyChannel(guild) {
     const n = this.opts.notify || {};
     const usable = (c) => (c && typeof c.send === 'function' ? c : null);
@@ -558,10 +558,9 @@ class TicketService {
    * Tell the team a ticket was opened: one message in the staff channel (pinging the configured
    * roles) and a DM to the owner. Only for the owner's own server, never for other servers that
    * run the bot. Never throws. Anything that fails is reported once to the server log.
-   * With { test: true } nobody is pinged and the message says so (used by /ticketalert).
    * Returns { skipped, staff, dm } where staff and dm are { ok, error? } or null when not attempted.
    */
-  async notifyOpened(guild, member, channel, number, { test = false } = {}) {
+  async notifyOpened(guild, member, channel, number) {
     const report = { skipped: null, staff: null, dm: null, roles: [] };
     try {
       const n = this.opts.notify || {};
@@ -573,12 +572,10 @@ class TicketService {
       const roleIds = (n.roleIds || []).filter((id) => guild.roles.cache.has(id));
       report.roles = roleIds;
       const embed = card({
-        title: test ? 'Test ticket alert' : 'New ticket',
-        description: test
-          ? `${mention.user(member.id)} ran a test. Nobody was pinged.`
-          : `${mention.user(member.id)} opened ${mention.channel(channel.id)}.`,
+        title: 'New ticket',
+        description: `${mention.user(member.id)} opened ${mention.channel(channel.id)}.`,
         fields: [
-          field('Ticket', test ? 'test' : `#${pad4(number)}`, true),
+          field('Ticket', `#${pad4(number)}`, true),
           field('Member', member.user.tag || member.user.username || member.id, true),
           field('Server', guild.name, true),
         ],
@@ -600,14 +597,13 @@ class TicketService {
 
       const jobs = [];
       if (target) {
-        const ping = test ? [] : roleIds;
         const label = mention.channel(target.id);
         jobs.push(
           send(label, () =>
             target.send({
               content: roleIds.map(mention.role).join(' ') || undefined,
               embeds: [embed],
-              allowedMentions: { roles: ping, users: [] },
+              allowedMentions: { roles: roleIds, users: [] },
             }),
           ).then((r) => (report.staff = r)),
         );

@@ -134,37 +134,3 @@ test('/ban: definition', () => {
   assert.equal(ban.audit, true);
   assert.equal(json.default_member_permissions, String(PermissionFlagsBits.Administrator));
 });
-
-test('/ticketalert: owner only, shows what arrived and what did not', async () => {
-  const alert = require('../src/commands/ticketAlert');
-  assert.equal(alert.ownerOnly, true);
-  const replies = [];
-  const interaction = {
-    guild: { id: 'G' },
-    member: { id: 'U' },
-    channel: { id: 'C' },
-    deferred: false,
-    replied: false,
-    deferReply: async () => {
-      interaction.deferred = true;
-    },
-    editReply: async (p) => replies.push(p),
-  };
-  const ctx = (report, problems = []) => ({
-    config: { tickets: { notify: { channelId: 'NEWS', userId: 'OWNER' } } },
-    tickets: { notifyOpened: async () => report, alertProblems: () => problems },
-  });
-
-  await alert.execute(interaction, ctx({ skipped: null, staff: { ok: true }, dm: { ok: false, error: 'Discord would not let me DM <@OWNER>.' }, roles: ['R1'] }));
-  let e = replies[0].embeds[0].toJSON();
-  assert.equal(e.title, 'Ticket alerts need attention');
-  assert.match(e.fields.find((f) => f.name === 'Staff channel').value, /Posted in <#NEWS>/);
-  assert.match(e.fields.find((f) => f.name === 'DM to the owner').value, /^Failed\. Discord would not let me DM/);
-
-  await alert.execute(interaction, ctx({ skipped: null, staff: { ok: true }, dm: { ok: true }, roles: ['R1'] }));
-  e = replies[1].embeds[0].toJSON();
-  assert.equal(e.title, 'Ticket alerts work');
-
-  await alert.execute(interaction, ctx({ skipped: 'not the owner server', staff: null, dm: null, roles: [] }));
-  assert.equal(replies[2].embeds[0].toJSON().title, 'No alert sent');
-});

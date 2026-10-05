@@ -3,25 +3,24 @@
 const { AuditLogEvent, Events, PermissionFlagsBits } = require('discord.js');
 const { card, field, mention, plural } = require('../ui');
 
-const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const SIGNATURE = 'Anti-nuke system made by 35bf';
 
 /**
- * Anti-nuke: someone who deletes more than `maxChannels` channels inside `windowMs` is sent a
- * private warning and then banned. Who deleted what comes from the audit log, which Discord
- * pushes to the bot the moment an entry is written.
+ * Anti-nuke: someone who deletes `banAt` channels inside `windowMs` is told about it (a private message
+ * to them, an alert in the staff channel) and then banned. Always on. Who deleted what comes from the
+ * audit log, which Discord pushes to the bot the moment an entry is written.
  *
  * Never touched: the server owner, the bot manager, this bot and the ids in `trustedIds`.
- * Deletions done by this bot itself (/setup server, closing tickets) are never counted.
+ * Deletions done by this bot itself (closing tickets) are never counted.
  */
 class AntiNukeService {
   /**
    * @param {object} p
    * @param {import('discord.js').Client} p.client
    * @param {import('../storage').Storage} p.storage
-   * @param {object} p.config the app config (uses config.manager and config.antiNuke)
+   * @param {object} p.config the app config (uses config.manager, config.antiNuke and config.tickets.notify)
    * @param {object} [p.logs] LogService, for one line in the server log
    */
   constructor({ client, storage, config, logs = null }) {
@@ -36,20 +35,6 @@ class AntiNukeService {
     this.recent = new Map();
     /** "guildId:userId" -> true while that person is being dealt with (one ban per burst) */
     this.acted = new Set();
-  }
-
-  // ---- the switch (per server, on unless the owner turned it off) ----
-
-  isOn(guildId) {
-    const map = this.storage.data.settings.antiNuke;
-    return !(map && hasOwn(map, guildId) && map[guildId] === false);
-  }
-
-  set(guildId, on) {
-    const map = this.storage.data.settings.antiNuke;
-    Object.defineProperty(map, guildId, { value: !!on, enumerable: true, writable: true, configurable: true });
-    this.storage.save();
-    return !!on;
   }
 
   // ---- who is exempt, what counts ----
@@ -85,10 +70,10 @@ class AntiNukeService {
 
   async onAudit(entry, guild) {
     if (entry.action !== AuditLogEvent.ChannelDelete) return null;
-    if (!this.isOn(guild.id) || this.isExempt(guild, entry.executorId)) return null;
+    if (this.isExempt(guild, entry.executorId)) return null;
     const userId = entry.executorId;
     const count = this.record(guild.id, userId, entry.createdTimestamp || Date.now());
-    if (count <= this.rule.maxChannels) return null;
+    if (count < this.rule.banAt) return null;
 
     const key = `${guild.id}:${userId}`;
     if (this.acted.has(key)) return null; // already being banned, the rest of the burst is ignored
@@ -112,31 +97,64 @@ class AntiNukeService {
       title: 'Anti-nuke',
       description:
         `You deleted ${plural(count, 'channel')} within ${plural(this.minutes(), 'minute')} on **${guild.name}**. ` +
-        `The limit is ${this.rule.maxChannels}.\n\nYou are being banned from the server now.`,
+        `Deleting ${plural(this.rule.banAt, 'channel')} gets you banned.\n\nYou are being banned from the server now.`,
       tone: 'danger',
       footer: false,
     }).setFooter({ text: SIGNATURE });
   }
 
-  /** Warn by DM (never waits long, never blocks), then ban. Tells the owner what happened. */
+  /** The channel that is told before the ban: the staff channel, else the server log channel. */
+  _alertChannel(guild) {
+    const notify = (this.config.tickets && this.config.tickets.notify) || {};
+    const usable = (c) => (c && typeof c.send === 'function' ? c : null);
+    const staff = notify.channelId ? usable(guild.channels.cache.get(notify.channelId)) : null;
+    return staff || (this.logs ? this.logs.channelFor(guild) : null);
+  }
+
+  /** Warn by DM and tell the server, both before the ban. Neither can hold the ban back for long. */
+  async _beforeBan(guild, user, userId, count) {
+    const notify = (this.config.tickets && this.config.tickets.notify) || {};
+    const who = user ? `${mention.user(userId)} \`${user.tag || user.username || userId}\`` : `\`${userId}\``;
+    const roleIds = (notify.roleIds || []).filter((id) => guild.roles && guild.roles.cache.has(id));
+
+    const dm = user ? user.send({ embeds: [this._warning(guild, count)] }).then(() => true, () => false) : Promise.resolve(false);
+    const channel = this._alertChannel(guild);
+    const alert = channel
+      ? channel
+          .send({
+            content: roleIds.map(mention.role).join(' ') || undefined,
+            embeds: [
+              card({
+                title: 'Anti-nuke',
+                description: `${who} deleted ${plural(count, 'channel')} within ${plural(this.minutes(), 'minute')}. They are being banned now.`,
+                tone: 'danger',
+                footer: false,
+                timestamp: true,
+              }).setFooter({ text: SIGNATURE }),
+            ],
+            allowedMentions: { roles: roleIds, users: [] },
+          })
+          .then(() => true, () => false)
+      : Promise.resolve(false);
+
+    const both = Promise.all([dm, alert]);
+    const [warned, announced] = await Promise.race([both, sleep(this.dmTimeoutMs).then(() => [false, false])]);
+    return { warned, announced };
+  }
+
+  /** Tell them and the server first, then ban. The owner gets a report afterwards. */
   async punish(guild, userId, count) {
     const user = await this.client.users.fetch(userId).catch(() => null);
 
-    // 1. Private warning first. A closed DM must not stop the ban, and neither may a slow one.
-    let warned = false;
-    if (user) {
-      warned = await Promise.race([
-        user.send({ embeds: [this._warning(guild, count)] }).then(() => true, () => false),
-        sleep(this.dmTimeoutMs).then(() => false),
-      ]);
-    }
+    // 1. Before the ban: the private warning and the alert in the server.
+    const { warned, announced } = await this._beforeBan(guild, user, userId, count);
 
     // 2. Ban.
     let banned = false;
     let error = null;
     try {
       await guild.members.ban(userId, {
-        reason: `${SIGNATURE}: deleted ${count} channels within ${this.minutes()} min (limit ${this.rule.maxChannels})`,
+        reason: `${SIGNATURE}: deleted ${count} channels within ${this.minutes()} min (limit ${this.rule.banAt})`,
         deleteMessageSeconds: 0,
       });
       banned = true;
@@ -151,7 +169,7 @@ class AntiNukeService {
       description: banned
         ? `${who} deleted ${plural(count, 'channel')} within ${plural(this.minutes(), 'minute')} and was banned.`
         : `${who} deleted ${plural(count, 'channel')} within ${plural(this.minutes(), 'minute')}, but the ban failed: ${error}.\nMove my role above theirs and give me Ban Members.`,
-      fields: [field('Warned by DM', warned ? 'Yes' : 'No (DMs closed)', true), field('Server', guild.name, true)],
+      fields: [field('Warned by DM', warned ? 'Yes' : 'No (DMs closed)', true), field('Server told', announced ? 'Yes' : 'No', true), field('Server', guild.name, true)],
       tone: banned ? 'warn' : 'danger',
       footer: false,
       timestamp: true,
@@ -163,15 +181,14 @@ class AntiNukeService {
     for (const id of recipients) {
       if (id) await this.client.users.send(id, { embeds: [report] }).catch(() => {});
     }
-    return { userId, count, warned, banned, error };
+    return { userId, count, warned, announced, banned, error };
   }
 
-  /** What /antinuke status shows: is the bot actually able to do its job here? */
+  /** Is the bot actually able to do its job on this server? */
   health(guild) {
     const perms = guild.members && guild.members.me && guild.members.me.permissions;
     const can = (flag) => !!perms && typeof perms.has === 'function' && perms.has(flag);
     return {
-      on: this.isOn(guild.id),
       canBan: can(PermissionFlagsBits.BanMembers),
       canSeeAudit: can(PermissionFlagsBits.ViewAuditLog),
     };

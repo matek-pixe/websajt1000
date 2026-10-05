@@ -20,8 +20,8 @@ test('owner and manager count as the owner of a command, nobody else does', () =
   assert.equal(isOwnerOrManager({ user: { id: 'OWNER' }, guild: null }, isManager), false);
 });
 
-test('/setup: the server owner and the manager may run it, an admin may not', () => {
-  for (const name of ['setup']) {
+test('the sos command is for the server owner and the manager, an admin may not run it', () => {
+  for (const name of ['sos']) {
     assert.equal(call(name, { user: 'OWNER' }), null, name);
     assert.equal(call(name, { user: 'MGR' }), null, name);
     assert.match(call(name, { user: 'ADMIN' }), /Only the server owner can use/, name);
@@ -36,8 +36,8 @@ test('manager commands refuse everyone else, even the server owner', () => {
   }
 });
 
-test('account commands need the verified role and a server; the refusal points at the ticket channel', () => {
-  for (const name of ['combo', 'stats', 'help']) {
+test('verified-only commands need the verified role and a server; the refusal points at the ticket channel', () => {
+  for (const name of ['stats']) {
     assert.equal(call(name), null, name);
     assert.match(call(name, { inGuild: false }), /inside a server/, name);
     const text = call(name, { gate: { ok: false, roleId: '111', channelId: '222' } });
@@ -54,5 +54,5 @@ test('commands without special rules pass for anyone in a server', () => {
 
 test('admin commands are marked for the command log', () => {
   for (const name of ['v', 'ban', 'lock', 'unlock', 'sos']) assert.equal(commands.get(name).audit, true, name);
-  for (const name of ['b', 'setup', 'sos', 'antinuke']) assert.ok(commands.get(name).managerOnly || commands.get(name).ownerOnly, name);
+  for (const name of ['b', 'sos']) assert.ok(commands.get(name).managerOnly || commands.get(name).ownerOnly, name);
 });

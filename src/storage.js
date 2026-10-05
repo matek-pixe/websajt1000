@@ -11,29 +11,19 @@ const path = require('node:path');
 function defaults() {
   return {
     version: 1,
-    pools: {
-      // `available`: accounts waiting to be handed out (in upload order).
-      // `given`: every account that was EVER handed out -> { userId, username, at }.
-      //          An account listed here is never handed out again, even if re-uploaded.
-      steam: { available: [], given: {} },
-      fivem: { available: [], given: {} },
-    },
-    // usage.<pool>.<userId> = number of accounts that user generated.
-    usage: { steam: {}, fivem: {} },
     // roles.<guildId>.<userId> = { roles: [roleId...], username, updatedAt }
     roles: {},
-    // autoRoles.<guildId> = { roleId, setBy, username, at } -> the role new members get,
-    //   the saved auto role of a server. Overrides the AUTO_ROLE_* env defaults.
+    // autoRoles.<guildId> = { roleId, setBy, username, at } -> the role new members get on that server.
+    //   Overrides the AUTO_ROLE_* env defaults.
     autoRoles: {},
     // tickets.<guildId> = { counter, categoryId, staffRoleId, transcript: { index, count },
     //   tickets: { <channelId>: {...} }, users: { <userId>: { lastClosedAt } } }
     tickets: {},
     // settings.bypass = true while the manager's /b "no limits" mode is switched on;
-    // settings.bypassUsers.<userId> = { by, at } for people the manager gave bypass to;
-    // settings.antiNuke.<guildId> = false when the owner switched anti-nuke off there (on otherwise).
-    settings: { bypass: false, bypassUsers: {}, antiNuke: {} },
-    // setup.<guildId> = { roles: { verified, staff, coowner, sensitive, blank }, channels: { key: id }, updatedAt }
-    //   -> what /setup created or adopted, so a re-run repairs the same channels instead of duplicating.
+    // settings.bypassUsers.<userId> = { by, at } for people the manager gave bypass to.
+    settings: { bypass: false, bypassUsers: {} },
+    // setup.<guildId> = { roles: { verified }, channels: { verify_ch: id } } -> the verified role and the verify
+    //   channel of a server, saved earlier. Only read.
     setup: {},
     // locks.<guildId>.<channelId> = { at, by, overwrites, added } -> the channel as it was before /lock,
     //   so /unlock puts back exactly that.
@@ -63,22 +53,14 @@ function mergeDefaults(base, loaded) {
   return loaded;
 }
 
-/** Make sure the pool arrays/objects have the right types even if someone hand-edited db.json. */
+/** Make sure every section has the right type even if someone hand-edited db.json. */
 function sanitize(data) {
-  for (const poolName of Object.keys(defaults().pools)) {
-    const pool = data.pools[poolName];
-    if (!Array.isArray(pool.available)) pool.available = [];
-    pool.available = pool.available.filter((a) => typeof a === 'string' && a.trim() !== '');
-    if (!isPlainObject(pool.given)) pool.given = {};
-    if (!isPlainObject(data.usage[poolName])) data.usage[poolName] = {};
-  }
   if (!isPlainObject(data.roles)) data.roles = {};
   if (!isPlainObject(data.autoRoles)) data.autoRoles = {};
   if (!isPlainObject(data.tickets)) data.tickets = {};
   if (!isPlainObject(data.settings)) data.settings = {};
   if (typeof data.settings.bypass !== 'boolean') data.settings.bypass = false;
   if (!isPlainObject(data.settings.bypassUsers)) data.settings.bypassUsers = {};
-  if (!isPlainObject(data.settings.antiNuke)) data.settings.antiNuke = {};
   if (!isPlainObject(data.setup)) data.setup = {};
   if (!isPlainObject(data.locks)) data.locks = {};
   if (!isPlainObject(data.sos)) data.sos = {};

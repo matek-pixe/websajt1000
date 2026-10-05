@@ -44,7 +44,7 @@ function run({ tier = 2, boosts = 9, memberCount = 120, bots = 3, boosting = 4, 
   b.tickets.c3 = { userId: 'U3', status: 'closed' };
   const replies = [];
   const interaction = { guild, reply: async (p) => replies.push(p) };
-  const ctx = { tickets: svc, setup: { getVerifiedRoleId: () => (verified ? 'VER' : null) } };
+  const ctx = { tickets: svc, verified: { getVerifiedRoleId: () => (verified ? 'VER' : null) } };
   return { go: () => stats.execute(interaction, ctx), replies, done: () => rm(dir) };
 }
 const fieldOf = (e, n) => (e.fields.find((f) => f.name === n) || {}).value;
