@@ -1,6 +1,6 @@
 'use strict';
 
-const { PermissionFlagsBits: P } = require('discord.js');
+const { PermissionFlagsBits: P, PermissionsBitField } = require('discord.js');
 
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
 const setOwn = (obj, key, value) => Object.defineProperty(obj, key, { value, enumerable: true, writable: true, configurable: true });
@@ -23,10 +23,18 @@ const GRANT = Object.freeze({
   UseVAD: true,
 });
 
+/** What staff may do on the server: kick people and delete messages, nothing else. */
+const STAFF_NAMES = Object.freeze(['KickMembers', 'ManageMessages']);
+const STAFF_PERMS = STAFF_NAMES.map((n) => P[n]);
+
+/** What staff gets in the private category and the log channel: look, nothing more. */
+const READ_ALLOW = Object.freeze(['ViewChannel', 'ReadMessageHistory']);
+const READ_DENY = Object.freeze(['SendMessages', 'SendMessagesInThreads', 'CreatePublicThreads', 'CreatePrivateThreads', 'AddReactions', 'ManageMessages', 'Connect', 'Speak']);
+
 /**
  * The role setup behind /priv:
  *   priv    a role with no permissions of its own that opens the private category
- *   staff   a role whose only permission is Kick Members, that opens the staff categories
+ *   staff   a role that can only kick people and delete messages; it opens the staff categories and may read the private category and the log
  *   member  the role every member gets: its name fixed, the other roles called member removed, given to everyone
  * It first works out exactly what it would do (plan), and only a confirmed plan is carried out.
  */
@@ -109,15 +117,23 @@ class PrivService {
     const staffCats = o.staffCategoryIds.map((id) => this._category(guild, id)).filter(Boolean);
     const staffMissing = o.staffCategoryIds.filter((id) => !staffCats.some((c) => c.id === id));
     const privRole = privCat ? this._existing(guild, 'roleId', o.roleName) : null;
-    const staffRole = staffCats.length ? this._existing(guild, 'staffRoleId', o.staffRoleName) : null;
-    const staffExtra = staffRole && staffRole.permissions && typeof staffRole.permissions.toArray === 'function' ? staffRole.permissions.toArray().filter((n) => n !== 'KickMembers') : [];
+    // Staff may read the private category and the log channel, wherever the log sits.
+    const readTargets = privCat ? [privCat, ...this._inside(guild, privCat)] : [];
+    const logChannel = this.config.logs && this.config.logs.channelId ? guild.channels.cache.get(this.config.logs.channelId) : null;
+    if (logChannel && !readTargets.includes(logChannel)) readTargets.push(logChannel);
+    const hasStaff = staffCats.length > 0 || readTargets.length > 0;
+
+    const staffRole = hasStaff ? this._existing(guild, 'staffRoleId', o.staffRoleName) : null;
+    const staffNames = staffRole && staffRole.permissions && typeof staffRole.permissions.toArray === 'function' ? staffRole.permissions.toArray() : null;
+    const staffExtra = staffNames ? staffNames.filter((n) => !STAFF_NAMES.includes(n)) : [];
+    const staffAdd = staffNames ? STAFF_NAMES.filter((n) => !staffNames.includes(n)) : [];
 
     const member = await this._planMember(guild, botTop);
     return {
       problems,
       priv: privCat ? { category: privCat, role: privRole, channels: this._inside(guild, privCat).length } : null,
       privMissing: privCat ? null : o.categoryId,
-      staff: staffCats.length ? { categories: staffCats, role: staffRole, extra: staffExtra, channels: staffCats.reduce((n, c) => n + this._inside(guild, c).length, 0) } : null,
+      staff: hasStaff ? { categories: staffCats, role: staffRole, extra: staffExtra, add: staffAdd, channels: staffCats.reduce((n, c) => n + this._inside(guild, c).length, 0), read: readTargets } : null,
       staffMissing,
       member,
     };
@@ -258,6 +274,25 @@ class PrivService {
     return { done, failed, skipped };
   }
 
+  /** Look and read, nothing else: everything that would let someone write, react, delete or join is denied. */
+  async readOnly(guild, channels, role, reason) {
+    const held = this._held(guild);
+    const options = {};
+    for (const key of READ_ALLOW) if (held[key] !== undefined || !guild.members.me) options[key] = true;
+    for (const key of READ_DENY) options[key] = false;
+    const done = [];
+    const failed = [];
+    for (const channel of channels) {
+      try {
+        await channel.permissionOverwrites.edit(role, options, { reason });
+        done.push(channel.name);
+      } catch (err) {
+        failed.push({ name: channel.name, error: err.message || 'unknown error' });
+      }
+    }
+    return { done, failed };
+  }
+
   /**
    * Carry out an approved plan. The plan is worked out again first, so what is changed is the server as it
    * is now, and only roles that were in the preview as "delete" are ever deleted.
@@ -278,7 +313,19 @@ class PrivService {
       }
 
       if (plan.staff) {
-        const { role, created } = await this._ensureRole(guild, { key: 'staffRoleId', name: this.opts.staffRoleName, permissions: [P.KickMembers], reason });
+        const { role, created } = await this._ensureRole(guild, { key: 'staffRoleId', name: this.opts.staffRoleName, permissions: STAFF_PERMS, reason });
+        // A role that was already there only gets what it lacks, nothing is ever taken away from it.
+        let added = [];
+        const errors = [];
+        if (!created && plan.staff.add.length) {
+          try {
+            const extra = plan.staff.add.reduce((a, n) => a | P[n], 0n);
+            await role.setPermissions(new PermissionsBitField(bits(role.permissions) | extra), reason);
+            added = plan.staff.add;
+          } catch (err) {
+            errors.push(`Could not add ${plan.staff.add.join(', ')}: ${err.message}`);
+          }
+        }
         const parts = { done: [], failed: [], skipped: [] };
         for (const cat of plan.staff.categories) {
           const r = await this.grant(guild, cat, role, reason);
@@ -286,8 +333,8 @@ class PrivService {
           parts.failed.push(...r.failed);
           parts.skipped = r.skipped;
         }
-        const extra = created ? [] : plan.staff.extra;
-        out.staff = { role, created, extra, ...parts };
+        const read = await this.readOnly(guild, plan.staff.read, role, reason);
+        out.staff = { role, created, extra: created ? [] : plan.staff.extra, added, errors, ...parts, read };
       }
 
       out.member = await this._runMember(guild, plan.member, approved.member, by, reason, onProgress);
@@ -355,4 +402,4 @@ class PrivService {
   }
 }
 
-module.exports = { PrivService, GRANT };
+module.exports = { PrivService, GRANT, STAFF_NAMES, READ_DENY };

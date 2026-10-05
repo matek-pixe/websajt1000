@@ -52,6 +52,7 @@ function mk({ botPerms = null, botTop = 50, failEdit = null, failGive = null, ex
         return new Map([...members.values()].filter((m) => m.roles.cache.has(role.id)).map((m) => [m.id, m]));
       },
       async setName(name) { log.push(`rename ${role.id} ${role.name} -> ${name}`); role.name = name; },
+      async setPermissions(p) { log.push(`permissions ${role.id}`); role.permissions = p; },
       async delete() {
         log.push(`delete ${role.id}`);
         // everyone must already have the member role when a duplicate goes
@@ -240,17 +241,23 @@ test('execute: priv has no permissions, staff has only Kick Members, each opens 
 
     const [privMade, staffMade] = k.created;
     assert.deepEqual([privMade.name, privMade.permissions], ['priv', []]);
-    assert.deepEqual([staffMade.name, staffMade.permissions], ['staff', [P.KickMembers]], 'the only permission is Kick Members');
+    assert.deepEqual([staffMade.name, staffMade.permissions], ['staff', [P.KickMembers, P.ManageMessages]], 'kick and delete messages, nothing else');
     assert.equal(staffMade.hoist, false);
     assert.equal(staffMade.mentionable, false);
 
     const forRole = (id) => k.edits.filter((e) => e.role === id).map((e) => e.channel);
     assert.deepEqual(forRole(res.priv.role.id), [PRIV_CAT, 'p1']);
-    assert.deepEqual(forRole(res.staff.role.id), [STAFF_CAT, 's1', 's2', VIP_CAT, 'v1']);
+    assert.deepEqual(forRole(res.staff.role.id), [STAFF_CAT, 's1', 's2', VIP_CAT, 'v1', PRIV_CAT, 'p1'], 'its own categories in full, then the private category');
     assert.ok(!k.edits.some((e) => e.channel === 'g1' || e.channel === 'g-cat'), 'no other channel is touched');
-    for (const e of k.edits) {
+    for (const e of k.edits.filter((x) => x.role === res.priv.role.id || [STAFF_CAT, 's1', 's2', VIP_CAT, 'v1'].includes(x.channel))) {
       assert.ok(['ViewChannel', 'SendMessages', 'Connect', 'Speak'].every((f) => e.allow[f] === true));
       assert.ok(Object.values(e.allow).every((v) => v === true), 'only allows');
+    }
+    // in the private category staff may only look: read yes, write, react, voice and deleting no
+    for (const e of k.edits.filter((x) => x.role === res.staff.role.id && [PRIV_CAT, 'p1'].includes(x.channel))) {
+      assert.equal(e.allow.ViewChannel, true);
+      assert.equal(e.allow.ReadMessageHistory, true);
+      for (const f of ['SendMessages', 'SendMessagesInThreads', 'CreatePublicThreads', 'CreatePrivateThreads', 'AddReactions', 'ManageMessages', 'Connect', 'Speak']) assert.equal(e.allow[f], false, `${f} is denied`);
     }
     assert.equal(k.svc.roleId('G'), res.priv.role.id);
     assert.equal(k.svc.staffRoleId('G'), res.staff.role.id);
@@ -289,18 +296,45 @@ test('execute: the member role is renamed, remembered, given to everyone and the
   }
 });
 
-test('execute: an existing staff role keeps its permissions, and a role that already exists is not made again', async () => {
-  const k = mk({ extraRoles: [{ id: 'ST', name: 'Staff', position: 2, perms: P.KickMembers | P.ManageMessages }] });
+test('execute: an existing staff role only gets what it lacks, nothing is taken away, and it is not made again', async () => {
+  const k = mk({ extraRoles: [{ id: 'ST', name: 'Staff', position: 2, perms: P.KickMembers | P.ManageNicknames }] });
   try {
-    const first = await k.svc.execute(k.guild, await k.svc.plan(k.guild), BY);
+    const plan = await k.svc.plan(k.guild);
+    assert.deepEqual(plan.staff.add, ['ManageMessages']);
+    assert.deepEqual(plan.staff.extra, ['ManageNicknames']);
+    const first = await k.svc.execute(k.guild, plan, BY);
     assert.equal(first.staff.created, false);
-    assert.deepEqual(first.staff.extra, ['ManageMessages']);
-    assert.equal(k.roles.get('ST').permissions.has(P.ManageMessages), true, 'its permissions were not changed');
+    assert.deepEqual(first.staff.added, ['ManageMessages']);
+    assert.equal(k.roles.get('ST').permissions.has(P.ManageMessages), true, 'delete messages was added');
+    assert.equal(k.roles.get('ST').permissions.has(P.KickMembers), true);
+    assert.equal(k.roles.get('ST').permissions.has(P.ManageNicknames), true, 'what it had stays');
+    assert.deepEqual(first.staff.extra, ['ManageNicknames']);
     assert.deepEqual(k.created.map((c) => c.name), ['priv']);
 
-    const again = await k.svc.execute(k.guild, await k.svc.plan(k.guild), BY);
-    assert.equal(again.priv.created, false, 'running it again reuses the roles');
-    assert.deepEqual(k.created.map((c) => c.name), ['priv']);
+    const again = await k.svc.plan(k.guild);
+    assert.deepEqual(again.staff.add, []);
+    const second = await k.svc.execute(k.guild, again, BY);
+    assert.equal(second.priv.created, false, 'running it again reuses the roles');
+    assert.deepEqual(second.staff.added, []);
+    assert.equal(k.log.filter((l) => l.startsWith('permissions')).length, 1, 'permissions are only written when something is missing');
+  } finally {
+    k.done();
+  }
+});
+
+test('execute: the staff role also reads the log channel when it sits outside the private category', async () => {
+  const k = mk({ extraChannels: [{ id: 'LOG', name: 'logs', parentId: 'g-cat' }] });
+  try {
+    k.svc.config = { ...k.svc.config, logs: { channelId: 'LOG' } };
+    const plan = await k.svc.plan(k.guild);
+    assert.deepEqual(plan.staff.read.map((c) => c.id), [PRIV_CAT, 'p1', 'LOG']);
+    const res = await k.svc.execute(k.guild, plan, BY);
+    const log = k.edits.find((e) => e.channel === 'LOG');
+    assert.equal(log.role, res.staff.role.id);
+    assert.equal(log.allow.ViewChannel, true);
+    assert.equal(log.allow.SendMessages, false);
+    assert.equal(log.allow.ManageMessages, false, 'staff cannot delete log entries');
+    assert.equal(k.edits.filter((e) => e.channel === 'LOG').length, 1, 'once, not twice');
   } finally {
     k.done();
   }
@@ -417,7 +451,8 @@ test('/priv: a preview of everything, nothing changed, and two buttons', async (
     assert.match(e.description, /Nothing has changed yet/);
     assert.match(e.description, /Deleted roles cannot be brought back/);
     assert.match(fieldOf(e, 'Priv role'), /A role called priv will be created, with no permissions of its own\. It opens \*\*PRIVATE\*\* and 1 channel inside/);
-    assert.match(fieldOf(e, 'Staff role'), /created with \*\*only Kick Members\*\*.*\*\*STAFF\*\* and \*\*VIP\*\* and 3 channels inside/);
+    assert.match(fieldOf(e, 'Staff role'), /created that can \*\*only kick people and delete messages\*\*.*\*\*STAFF\*\* and \*\*VIP\*\* and 3 channels inside/);
+    assert.match(fieldOf(e, 'Staff in the private category'), /It can see 2 channels there.*It cannot write, react, join voice or delete messages in them/);
     assert.match(fieldOf(e, 'Member role'), /<@&M1> is the one that stays.*renamed from Member to \*\*member\*\*.*New members get exactly this role.*given to 3 of 6 members/);
     assert.match(fieldOf(e, 'Deleted (1)'), /member, 0 members/);
     const ids = log.replies[0].components[0].toJSON().components.map((c) => c.custom_id);
@@ -465,7 +500,7 @@ test('/priv: Run does it all, mutes the log once and shows the result; Cancel an
     const done = embed(run.log.replies[run.log.replies.length - 1]);
     assert.equal(done.title, 'Priv setup done');
     assert.match(fieldOf(done, 'Priv role'), /created\. Opened 2 channels/);
-    assert.match(fieldOf(done, 'Staff role'), /created\. Its only permission is Kick Members\. Opened 5 channels/);
+    assert.match(fieldOf(done, 'Staff role'), /created\. It can only kick people and delete messages\. Opened 5 channels, and can read 2 channels in the private category and the log/);
     assert.match(fieldOf(done, 'Member role'), /renamed\. Given to 3 members, 3 already had it/);
     assert.match(fieldOf(done, 'Deleted (1)'), /member, 0 members/);
     assert.deepEqual(state(), { held: 1, released: 1 });

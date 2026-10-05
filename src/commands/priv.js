@@ -18,13 +18,17 @@ function previewCard(plan) {
   }
 
   if (plan.staff) {
-    const { categories, role, extra, channels } = plan.staff;
-    const opens = `It opens ${categories.map((c) => `**${c.name}**`).join(' and ')} and ${channelsOf(channels)} inside, same access as priv.`;
-    const base = role ? `${mention.role(role.id)} exists, its permissions stay as they are.` : 'A role called staff will be created with **only Kick Members**.';
-    const warn = role && extra.length ? ` It also has ${extra.slice(0, 6).join(', ')}${extra.length > 6 ? '…' : ''}, I will not change that.` : '';
-    fields.push(field('Staff role', `${base}${warn} ${opens}${plan.staffMissing.length ? ` Not on this server: ${plan.staffMissing.join(', ')}.` : ''}`));
+    const { categories, role, extra, add, channels, read } = plan.staff;
+    const base = role
+      ? `${mention.role(role.id)} exists.${add.length ? ` It gets ${add.join(' and ')} added, nothing is taken away.` : ' It already has what it needs.'}${extra.length ? ` It also has ${extra.slice(0, 6).join(', ')}${extra.length > 6 ? '…' : ''}, I will not change that.` : ''}`
+      : 'A role called staff will be created that can **only kick people and delete messages**.';
+    const opens = categories.length ? ` It opens ${categories.map((c) => `**${c.name}**`).join(' and ')} and ${channelsOf(channels)} inside, same access as priv.` : '';
+    fields.push(field('Staff role', `${base}${opens}${plan.staffMissing.length ? ` Not on this server: ${plan.staffMissing.join(', ')}.` : ''}`));
+    if (read.length) {
+      fields.push(field('Staff in the private category', `It can see ${plural(read.length, 'channel')} there, the category and the log channel, and read them. It cannot write, react, join voice or delete messages in them.`));
+    }
   } else {
-    fields.push(field('Staff role', 'Skipped, none of the staff categories are on this server.'));
+    fields.push(field('Staff role', 'Skipped, none of the staff categories or the private category are on this server.'));
   }
 
   const m = plan.member;
@@ -72,10 +76,14 @@ function resultCard(res) {
 
   if (res.staff) {
     const a = access(res.staff);
-    problems += a.failed.length;
-    const note = res.staff.created ? ' Its only permission is Kick Members.' : res.staff.extra.length ? ` Its permissions were left as they are, it also has ${res.staff.extra.slice(0, 6).join(', ')}.` : ' Its permissions were left as they are.';
-    fields.push(field('Staff role', `${mention.role(res.staff.role.id)} ${res.staff.created ? 'created' : 'reused'}.${note} Opened ${channelsOf(a.count)}.`));
-    if (a.failed.length) fields.push(field('Staff, could not change', lines(a.failed, { max: 6, limit: 800 })));
+    const r = access(res.staff.read);
+    problems += a.failed.length + r.failed.length + res.staff.errors.length;
+    const note = res.staff.created
+      ? ' It can only kick people and delete messages.'
+      : `${res.staff.added.length ? ` Added ${res.staff.added.join(' and ')}.` : ''}${res.staff.extra.length ? ` It also has ${res.staff.extra.slice(0, 6).join(', ')}, left as it is.` : ''}`;
+    fields.push(field('Staff role', `${mention.role(res.staff.role.id)} ${res.staff.created ? 'created' : 'reused'}.${note} Opened ${channelsOf(a.count)}, and can read ${channelsOf(r.count)} in the private category and the log.`));
+    const bad = [...res.staff.errors, ...a.failed, ...r.failed];
+    if (bad.length) fields.push(field('Staff, could not change', lines(bad, { max: 6, limit: 800 })));
   }
 
   const m = res.member;
@@ -117,7 +125,7 @@ async function deliver(interaction, embed) {
 /**
  * /priv: set up the roles in one go, after a preview and a confirmation. Admins only.
  *   priv    no permissions of its own, opens the private category
- *   staff   only Kick Members, opens the staff categories
+ *   staff   can only kick people and delete messages, opens the staff categories, reads the private category and the log
  *   member  the role every member gets: written in small letters, the other roles called member removed,
  *           given to everyone
  */

@@ -19,7 +19,7 @@ gives everyone an **auto role** on join, **remembers each member's roles** by th
 | `/antinuke [mode]` | **server owner** | Shows or switches the anti-nuke protection of this server (on by default). See *Anti-nuke* below. |
 | `/aa` | **server owner** | Sets the role every new member gets on **this** server, e.g. `/aa @Member`. Run with no role to see the current setting. |
 | `/f role` | **admins** | Gives a role to **every member** of the server (bots skipped unless `bots:true`). `action:Remove` takes it away from everyone. Shows progress and a summary. |
-| `/priv` | **admins** | Sets up three roles in one go, after a preview and a confirmation. **priv**: no permissions of its own, opens the private category `PRIV_CATEGORY_ID` (see, write, join and speak in voice). **staff**: its only permission is **Kick Members**, opens the categories `PRIV_STAFF_CATEGORY_IDS` the same way. **member**: the role every member gets, written in small letters, the other roles called member are deleted (only empty ones nobody depends on) and it is given to everyone. See *Roles with /priv* below. |
+| `/priv` | **admins** | Sets up three roles in one go, after a preview and a confirmation. **priv**: no permissions of its own, opens the private category `PRIV_CATEGORY_ID` (see, write, join and speak in voice). **staff**: can only **kick people and delete messages**, opens the categories `PRIV_STAFF_CATEGORY_IDS` the same way and may only **look and read** in the private category and the log channel. **member**: the role every member gets, written in small letters, the other roles called member are deleted (only empty ones nobody depends on) and it is given to everyone. See *Roles with /priv* below. |
 | `/lock` | **admins** | Locks the channel it is written in: only admins and the server owner can write there, everyone else cannot. Posts a **Channel locked** card. |
 | `/unlock` | **admins** | Opens a channel locked with `/lock` and puts its permissions back exactly as they were. |
 | `/sos start` · `/sos end` · `/sos status` | **server owner** | Emergency button. `start` saves the whole server, then hides every channel from everyone except the owner. `end` puts every channel and role back exactly as it was and proves it. See *Lock and SOS* below. |
@@ -145,10 +145,13 @@ never be handed out twice anywhere.)
 
 `/priv` first shows a preview of everything and does nothing until an admin presses **Run**.
 
-- **priv** and **staff** are made once and remembered (also when renamed). Each only gets an *allow* on its
-  categories and on every channel inside them; nobody else's permissions change. **staff** is created with
-  **only Kick Members**. If a role called staff already exists it is reused and its permissions are **not**
-  changed (the preview and the result say if it has more than Kick Members).
+- **priv** and **staff** are made once and remembered (also when renamed). Nobody else's permissions change.
+  **priv** gets an *allow* on its category and every channel inside. **staff** is created with **Kick Members
+  and Manage Messages** and nothing else, and gets the same full access in `PRIV_STAFF_CATEGORY_IDS`. In the
+  private category and in the log channel it may only **see and read**: writing, reacting, threads, voice and
+  Manage Messages are denied there, so staff cannot write in or delete from the logs. If a role called staff
+  already exists it is reused: it only gets what it lacks (Kick Members, Manage Messages), nothing is ever
+  taken away, and the preview and the result say if it has more.
 - **member** is the role the bot gives new members. It is renamed to `member` (`PRIV_MEMBER_ROLE_NAME`), remembered as the
   server's auto role, and given to every member who lacks it (bots skipped). Only after everyone has it are the
   other roles called member deleted, and only those that are **empty of consequence**: not managed, below my
