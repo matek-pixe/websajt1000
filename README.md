@@ -19,7 +19,6 @@ gives everyone an **auto role** on join, **remembers each member's roles** by th
 | `/antinuke [mode]` | **server owner** | Shows or switches the anti-nuke protection of this server (on by default). See *Anti-nuke* below. |
 | `/aa` | **server owner** | Sets the role every new member gets on **this** server, e.g. `/aa @Member`. Run with no role to see the current setting. |
 | `/f role` | **admins** | Gives a role to **every member** of the server (bots skipped unless `bots:true`). `action:Remove` takes it away from everyone. Shows progress and a summary. |
-| `/fix` | **admins** | Gets people back in. Finds the member role (makes it again if it is gone, written `member`), remembers it as the role new members get and **gives it to everyone**. Then checks that new people can see the **verify** category and read it, opens it for @everyone (read only) if not, and posts the ticket button again if it is missing. Only ever adds, nothing is deleted. |
 | `/lock` | **admins** | Locks the channel it is written in: only admins and the server owner can write there, everyone else cannot. Posts a **Channel locked** card. |
 | `/unlock` | **admins** | Opens a channel locked with `/lock` and puts its permissions back exactly as they were. |
 | `/sos start` · `/sos end` · `/sos status` | **server owner** | Emergency button. `start` saves the whole server, then hides every channel from everyone except the owner. `end` puts every channel and role back exactly as it was and proves it. See *Lock and SOS* below. |
@@ -140,23 +139,6 @@ cooldowns survive restarts.
 **Every server is independent.** Ticket numbers, the category, cooldowns and the staff role are all
 stored per server, so each server starts at `ticket-0001` and never interferes with another. (Only the Steam/FiveM account pools are shared, on purpose, so the same account can
 never be handed out twice anywhere.)
-
-### Getting people in with /fix
-
-`/fix` repairs the two things a new person needs, and only ever adds:
-
-1. **The member role.** The bot looks for the role it gives to new members (the one chosen with `/aa`, else
-   `AUTO_ROLE_ID`, else a role called member in any capitals) and makes it again if it is gone. Only the capitals of
-   its name are corrected (`MEMBER_ROLE_NAME`, default `member`), a role with another name is somebody's choice
-   and stays. It is remembered as the server's auto role, so everyone who joins from now on gets exactly it,
-   and it is given to every member who lacks it (bots skipped). A role above my own role, or one that belongs
-   to a bot, is explained instead.
-2. **The verify category.** It is found through what `/setup server` built (else by its name). For each of its
-   channels, going by the raw permission numbers, a person who only holds the member role must be able to see and
-   read it. If not, `@everyone` gets *look and read, nobody writes* on the category and its channels, like `/setup`
-   builds it (verified members stay hidden from it through their own deny). If something overrides it for the
-   member role itself, that role is opened too. Then the **ticket button** is looked for in the verify channel and
-   posted again if it is missing (if the channel cannot be read, nothing is posted, so there are no doubles).
 
 ### Lock and SOS
 
@@ -483,7 +465,6 @@ src/
     antinuke.js          # bans anyone who deletes too many channels
     overwrites.js        # exact permission maths for /lock and /sos
     lockdown.js          # /lock and /sos: save, apply, restore, verify
-    fix.js               # /fix: member role, verify category, ticket button
     transcriptHtml.js    # the transcript page
     transcriptMedia.js   # downloads the pictures into it
     transcriptHost.js    # puts it online (R2 or the own website)
@@ -496,7 +477,6 @@ src/
     antinuke.js          # /antinuke (status, on, off)
     ban.js               # /ban (admins, with a reason)
     lock.js unlock.js    # /lock  /unlock
-    fix.js               # /fix (member role and verify category)
     sos.js               # /sos start | end | status
     ticketAlert.js       # /ticketalert (test the alerts)
 test/                    # unit tests

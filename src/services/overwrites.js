@@ -18,7 +18,7 @@ const VIEW = P.ViewChannel;
 const WRITE = P.SendMessages | P.SendMessagesInThreads | P.CreatePublicThreads | P.CreatePrivateThreads;
 const ADMIN = P.Administrator;
 
-const big = (v) => (v && typeof v === 'object' && 'bitfield' in v ? BigInt(v.bitfield) : BigInt(v || 0));
+const big = (v) => BigInt(v || 0);
 const raw = (o) => ({ id: String(o.id), type: Number(o.type), allow: String(big(o.allow)), deny: String(big(o.deny)) });
 const overwritesOf = (apiChannel) => (apiChannel.permission_overwrites || []).map(raw);
 const sameBits = (a, b) => !!a && !!b && a.id === b.id && a.type === b.type && big(a.allow) === big(b.allow) && big(a.deny) === big(b.deny);
@@ -181,12 +181,6 @@ function memberPerms({ memberId, roleIds = [], roles, channel, everyoneId, owner
 /** Can this member see this channel? */
 const memberCanView = (args) => !!(memberPerms(args) & VIEW);
 
-/** Can this member see the channel and read what is in it? (Without seeing it there is nothing else.) */
-const memberCanRead = (args) => {
-  const perms = memberPerms(args);
-  return !!(perms & VIEW) && !!(perms & P.ReadMessageHistory);
-};
-
 /** Roles that can see the channel on their own, and whether @everyone can. */
 function whoSees(channel, roles, everyoneId) {
   const everyone = memberCanView({ roleIds: [], roles, channel, everyoneId });
@@ -220,6 +214,5 @@ module.exports = {
   takeSnapshot,
   memberPerms,
   memberCanView,
-  memberCanRead,
   whoSees,
 };

@@ -76,11 +76,6 @@ const config = {
     },
   },
 
-  // /fix: how the role every member gets is written (only capitals are ever corrected).
-  fix: {
-    memberRoleName: (env.MEMBER_ROLE_NAME || 'member').trim() || 'member',
-  },
-
   // Anti-nuke: whoever deletes more than maxChannels channels within windowMs is warned by DM and
   // banned. The server owner, the manager, this bot and trustedIds are never touched.
   antiNuke: {
