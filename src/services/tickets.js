@@ -301,6 +301,11 @@ class TicketService {
     return !!(staffRoleId && member.roles && member.roles.cache && member.roles.cache.has(staffRoleId));
   }
 
+  /** How many tickets are open on a server right now. */
+  openCount(guildId) {
+    return Object.values(this._guild(guildId).tickets).filter((t) => t && t.status === 'open').length;
+  }
+
   /** The ticket record for a channel, or null if the channel is not a ticket. */
   get(guildId, channelId) {
     const b = this._guild(guildId);

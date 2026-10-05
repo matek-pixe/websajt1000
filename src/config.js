@@ -41,18 +41,6 @@ const config = {
 
   dataDir: path.resolve(env.DATA_DIR || path.join(__dirname, '..', 'data')),
 
-  // Name of the single text channel that survives /n.
-  finalChannelName: 'zavrseno',
-
-  // Title of the /stats embed.
-  statsTitle: 'Rastrosan',
-
-  // Max size of an uploaded refill file (bytes).
-  maxRefillFileBytes: 8 * 1024 * 1024,
-
-  // Pause between channel deletions in /n (ms) so we go "one by one" gently.
-  nukeDelayMs: 350,
-
   // Ticket system (/v panel, OPEN TICKET button, /new, /close, /open, /add, /claim).
   tickets: {
     // Category that holds open/closed tickets (created on first use, renamed if it already exists).

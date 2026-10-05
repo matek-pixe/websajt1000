@@ -14,7 +14,7 @@ const SIGNATURE = 'Anti-nuke system made by 35bf';
  * pushes to the bot the moment an entry is written.
  *
  * Never touched: the server owner, the bot manager, this bot and the ids in `trustedIds`.
- * Deletions done by this bot itself (/n, /setup server, closing tickets) are never counted.
+ * Deletions done by this bot itself (/setup server, closing tickets) are never counted.
  */
 class AntiNukeService {
   /**

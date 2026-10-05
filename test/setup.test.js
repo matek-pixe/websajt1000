@@ -1086,18 +1086,18 @@ test('verifiedGate: the verified role, owner, admins, manager and bypass pass; e
   }
 });
 
-test('command flags: verified-only account commands, owner-only /n and /setup', () => {
+test('command flags: verified-only commands, owner-only /setup', () => {
   const { commands } = require('../src/commands');
-  for (const n of ['steam', '5m', 'combo', 'stats', 'help', 'ping']) {
+  for (const n of ['combo', 'stats', 'help']) {
     assert.equal(commands.get(n).requiresVerified, true, n);
     assert.ok(!commands.get(n).ownerOnly, n);
   }
-  for (const n of ['n', 'setup']) {
+  for (const n of ['setup']) {
     assert.equal(commands.get(n).ownerOnly, true, n);
     assert.equal(commands.get(n).managerOnly, false, n);
   }
   assert.equal(commands.get('setup').buttonPrefix, 'setup:');
-  for (const n of ['v', 'close', 'add', 'aa', 'f', 'roles', 'b', 'refills', 'refill5']) {
+  for (const n of ['v', 'close', 'add', 'b']) {
     assert.ok(!commands.get(n).requiresVerified, n);
   }
 });

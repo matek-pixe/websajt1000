@@ -104,7 +104,7 @@ function buildLayout(siteName) {
           text('chat', '💬', 'CHAT', 'members', 'General chat for verified members.'),
           text('balkan', '🌍', 'BALKAN', 'members', 'Chat in your own language.'),
           text('cmds', '🤖', 'CMDS', 'members', 'Bot commands go here.'),
-          text('gen', '🎮', 'GEN', 'members', 'Use /steam, /5m and /combo here.'),
+          text('gen', '🎮', 'GEN', 'members', 'Use /combo here.'),
           text('triggers', '♾️', 'TRIGGERS', 'members', 'Triggers and scripts.'),
           text('server', '📢', 'SERVER', 'members', 'News and info about the server.'),
           text('dump', '🗑️', 'DUMP', 'members', 'Anything goes. Media, links, random.'),

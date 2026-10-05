@@ -99,7 +99,7 @@ class RoleMemoryService {
 
   /**
    * Sort remembered role ids into what the bot can restore and why the rest cannot be restored.
-   * Used on join (for a clear log) and by /roles (so admins can see the reason themselves).
+   * Used on join, to say clearly why a role could not be given back.
    */
   classifyRemembered(guild, roleIds, me = guild.members.me) {
     const botHighest = me && me.roles && me.roles.highest ? me.roles.highest.position : 0;
@@ -115,7 +115,7 @@ class RoleMemoryService {
     return out;
   }
 
-  /** The role id the server owner chose for this guild via /aa (null if none set). */
+  /** The role id saved as this guild's auto role (null if none is saved). */
   getGuildAutoRole(guildId) {
     const map = this.storage.data.autoRoles;
     if (!map || !hasOwn(map, guildId)) return null;
@@ -217,7 +217,7 @@ class RoleMemoryService {
 
   /**
    * Resolve the auto role for a guild, in priority order:
-   *   1. the role the server owner picked with /aa (per guild);
+   *   1. the role saved for this guild;
    *   2. AUTO_ROLE_ID from the environment;
    *   3. a role named AUTO_ROLE_NAME (created if missing and the bot may manage roles).
    * @param {import('discord.js').Guild} guild
@@ -229,7 +229,7 @@ class RoleMemoryService {
     if (configuredId) {
       const configured = guild.roles.cache.get(configuredId) || (await guild.roles.fetch(configuredId).catch(() => null));
       if (configured) return configured;
-      console.warn(`[roles] /aa role ${configuredId} no longer exists in guild ${guild.id}; falling back to defaults.`);
+      console.warn(`[roles] saved auto role ${configuredId} no longer exists in guild ${guild.id}; falling back to defaults.`);
     }
 
     const { id, name } = this.autoRoleConfig;
@@ -268,7 +268,7 @@ class RoleMemoryService {
     const applied = [];
 
     // Apply the auto role on its own so that if it happens to be un-assignable (e.g. an owner set
-    // it above the bot with /aa), the failure does NOT also discard the member's remembered roles.
+    // it above the bot), the failure does NOT also discard the member's remembered roles.
     if (autoRole && !member.roles.cache.has(autoRole.id)) {
       try {
         await member.roles.add(autoRole.id, '35xw auto role');

@@ -1,8 +1,9 @@
 # 35xw – Discord bot
 
-A Discord bot that hands out **Steam** and **FiveM** accounts (never the same account twice),
-gives everyone an **auto role** on join, **remembers each member's roles** by their Discord ID
-(even after they leave), shows a **"Rastrošan"** stats board, and has a **delete‑all** safety switch.
+A Discord bot for a verified community server: a **ticket system** with HTML transcripts, a one-command
+**server setup**, an **anti-nuke** guard, **/lock** and the **/sos** emergency button, a **server log**, an **auto
+role** on join with **role memory** (members keep their roles after they leave), a **/stats** card, and an optional
+Discord-gated **website**.
 
 ---
 
@@ -10,55 +11,43 @@ gives everyone an **auto role** on join, **remembers each member's roles** by th
 
 | Command | Who | What it does |
 | --- | --- | --- |
-| `/steam` | **verified** | Gives you one Steam account that has **never** been given to anyone on the server. |
-| `/5m` | **verified** | Gives you one FiveM account that **no one** has ever generated. |
 | `/combo` | **verified** | Gives you one Steam **and** one FiveM account together, one below the other, each split into labelled lines (username / e-mail / password / extra). |
 | `/help` | **verified** | Lists every command and how to use it. |
-| `/stats` | **verified** | Posts the **Rastrošan** embed: member count + top `/steam` and top `/5m` users (separately). |
+| `/stats` | **verified** | Shows the server: **members** (people, bots, verified), the **boost level** with the boosts and how many more the next level needs, open tickets, channels, roles, emoji and stickers, when the server was made and who owns it. |
 | `/setup server` | **server owner** | Rebuilds the whole server layout and roles after a preview and a confirmation. Keeps `osjetljivo`, the tickets category, the `+` role and other protected roles. See *Server setup* below. |
 | `/antinuke [mode]` | **server owner** | Shows or switches the anti-nuke protection of this server (on by default). See *Anti-nuke* below. |
-| `/aa` | **server owner** | Sets the role every new member gets on **this** server, e.g. `/aa @Member`. Run with no role to see the current setting. |
-| `/f role` | **admins** | Gives a role to **every member** of the server (bots skipped unless `bots:true`). `action:Remove` takes it away from everyone. Shows progress and a summary. |
 | `/lock` | **admins** | Locks the channel it is written in: only admins and the server owner can write there, everyone else cannot. Posts a **Channel locked** card. |
 | `/unlock` | **admins** | Opens a channel locked with `/lock` and puts its permissions back exactly as they were. |
 | `/sos start` · `/sos end` · `/sos status` | **server owner** | Emergency button. `start` saves the whole server, then hides every channel from everyone except the owner. `end` puts every channel and role back exactly as it was and proves it. See *Lock and SOS* below. |
 | `/ban user [reason]` | **admins** | Bans a member (or a user id that already left) and writes the reason, with the admin's name, into the audit log. The target must sit below the admin and the bot in the role list. |
 | `/ticketalert` | **server owner** | Sends a test ticket alert (nobody is pinged) and shows what arrived and what did not, with the fix. |
-| `/roles` | **staff** | Shows the roles the bot remembers for a user (`user:` or paste an `id:` of someone who left) and whether it can restore them, with the reason if not. |
-| `/refills` | **manager only** | Attach `steam.txt` to refill the Steam pool. |
-| `/refill5` | **manager only** | Attach `fivem.txt` to refill the FiveM pool. |
 | `/b [user] [mode]` | **manager only** | Bypass: exempt from every limit (command cooldowns, one-open-ticket rule, ticket cooldown). `/b` toggles your own; `/b user:@someone` gives it to (or takes it from) that person; `mode:on/off` sets it explicitly; `mode:List` shows who has it. Persisted across restarts. |
-| `/n` | **server owner** | Deletes **all** channels one by one and leaves a single text channel named `zavrseno`. Asks for confirmation first. |
 | `/v [staff]` | **staff** | Posts the **35xw verification** panel with a 🎫 **OPEN TICKET** button. Optionally sets the staff role. |
 | `/close` | opener / staff | Closes the current ticket: saves the HTML transcript, then deletes the channel. |
 | `/add` | **staff** | Adds a user or role to the current ticket. |
-| `/ping` | **verified** | Bot latency. |
 
 - **verified** = members holding the VERIFIED role (the role staff hands out after a ticket; see
   `/setup server`). The manager, people with bypass, the server owner and admins always pass. On a server
   where no VERIFIED role is known yet (no `/setup server`, and the `.env` id does not exist there) those
   commands stay open to everyone.
-- **server owner** commands (`/n`, `/setup server`, `/antinuke`, `/sos`) also work for the manager, but for no admin.
+- **server owner** commands (`/setup server`, `/antinuke`, `/sos`) also work for the manager, but for no admin.
 - Every command has a **30‑second cooldown per user** (configurable via `COOLDOWN_SECONDS`).
 - Account replies are **ephemeral** – only the person who ran the command can see the account.
-- The **manager** is the only person allowed to refill accounts or hand out bypass. The manager is
+- The **manager** is the only person allowed to hand out bypass. The manager is
   identified by their Discord **user ID** (`1143659003327553556`, username `35bf`), which cannot
   be spoofed by changing a nickname.
 
 ### How accounts never repeat
 
 Every account that is handed out is written into a permanent `given` registry keyed by the account
-line itself. `/steam` and `/5m` only ever take from the pool of accounts that are **not** in that
-registry, and refills skip any account that was already given out or is already waiting. So an
-account can only ever be handed to one person, even if the manager re‑uploads an old file.
+line itself. `/combo` only ever takes from the pool of accounts that are **not** in that registry, so an
+account can only ever be handed to one person. There is no command to refill the pools any more.
 
-### Auto role per server
+### Auto role
 
-Each server's **owner** chooses the auto role for their own server with `/aa @Role`. That choice is
-stored per server and takes priority over the `AUTO_ROLE_ID` / `AUTO_ROLE_NAME` defaults in `.env`.
-Until an owner runs `/aa`, the bot falls back to those defaults (creating a role named by
-`AUTO_ROLE_NAME` if needed). The bot's own role must sit **above** the chosen role for it to be able
-to assign it; `/aa` warns you if it doesn't.
+Everyone who joins gets the **auto role**: the role saved for the server, else `AUTO_ROLE_ID` from `.env`, else a
+role called `AUTO_ROLE_NAME` (default `member`, found whatever the capitals), which is created if it is missing.
+The bot's own role must sit **above** it, and the bot needs Manage Roles, or it cannot give it.
 
 ### Role memory
 
@@ -66,17 +55,12 @@ to assign it; `/aa` warns you if it doesn't.
 - Roles are saved keyed by **guild ID + Discord user ID**, so the memory survives a member leaving
   the server entirely. It updates whenever someone's roles change and when they leave.
 - The bot only restores roles it is actually allowed to assign (not managed roles, and only roles
-  **below its own highest role**). If someone comes back without their roles, run `/roles` on them:
-  it lists what is remembered and flags roles that sit above the bot's role, which is the usual cause.
-  The join log prints the same breakdown, and the server log channel gets a **Roles not restored**
+  **below its own highest role**). If someone comes back without their roles, the usual cause is a role that sits above the bot's
+  role. The console prints the breakdown when they join, and the server log channel gets a **Roles not restored**
   line naming the roles it could not give back.
 - **Moderation note:** a plain **kick** does not stop role memory — a kicked member who rejoins gets
   their old roles back. To permanently strip someone, **ban** them: a ban clears their remembered
   roles so a later rejoin starts clean.
-
-> **`/n` on Community servers:** Discord does not allow deleting the mandatory rules and
-> community-updates channels, so on a Community server those remain alongside `zavrseno`. On a normal
-> server `/n` really does leave exactly one channel.
 
 ### Ticket system
 
@@ -309,7 +293,7 @@ invites and webhooks, server changes and the bot's own admin commands.
   Content Intent** switched on in the Developer Portal (Bot page). Without it the bot logs everything
   else and says "Not logged" for the text. Turning the flag on before the intent makes Discord refuse
   the login, so switch the intent on first.
-- **Quiet while it works.** `/setup server`, `/n` and `/f` would create hundreds of lines, so the log
+- **Quiet while it works.** `/setup server`, `/sos` and the other mass changes would create hundreds of lines, so the log
   is muted for the guild while they run and gets one summary line instead.
 - **Ticket channels** created and deleted by the bot are left out (the transcript covers them).
 - The bot needs to see and write in the channel and have **View Audit Log** (Administrator has it).
@@ -324,7 +308,7 @@ manager, if they are on the server) gets a DM about it and the server log gets a
 possible, the same messages say why (usually: my role must be above theirs, and I need Ban Members).
 
 - **Never touched:** the server owner, the bot manager, the bot itself and `ANTINUKE_TRUSTED_IDS`.
-  Deletions made by the bot (`/n`, `/setup server`, closing tickets) are not counted.
+  Deletions made by the bot (`/setup server`, closing tickets) are not counted.
 - `/antinuke` shows the state and whether the bot has **Ban Members** and **View Audit Log**;
   `/antinuke mode:Off` / `mode:On` switches it for the server. The switch is saved.
 - Settings: `ANTINUKE_MAX_CHANNELS` (3) and `ANTINUKE_WINDOW_MINUTES` (10).
@@ -376,8 +360,7 @@ ticket transcripts).
 https://discord.com/api/oauth2/authorize?client_id=YOUR_CLIENT_ID&scope=bot%20applications.commands&permissions=268561424
 ```
 
-> Make sure the bot's role is **above** the auto role and any roles it should manage, and that it
-> has permission to delete channels for `/n`.
+> Make sure the bot's role is **above** the auto role and any roles it should manage.
 
 ### 3. Configure
 
@@ -399,8 +382,7 @@ npm start        # starts the bot
 
 If you set `GUILD_ID`, commands appear in that server instantly. **Leave `GUILD_ID` empty to run on
 all servers** (global commands) — they can take up to an hour to show up the first time. In
-all-servers mode, leave `AUTO_ROLE_ID` empty and let each server's owner pick their role with `/aa`
-(or rely on the `AUTO_ROLE_NAME` default per server).
+all-servers mode, leave `AUTO_ROLE_ID` empty and rely on the `AUTO_ROLE_NAME` default per server.
 
 The bot also **registers its commands automatically on startup**, so `npm run deploy` is optional.
 In all-servers mode it registers them **per guild**, so commands appear instantly on every server the
@@ -416,23 +398,12 @@ need to set the start command and hit start.
 
 ---
 
-## Refilling accounts
-
-Format of `steam.txt` / `fivem.txt`: **one account per line** (any format, e.g. `login:password`).
-Blank lines and lines starting with `#` are ignored; duplicate lines count once.
-
-1. As the manager, run `/refills` and attach `steam.txt` (or `/refill5` with `fivem.txt`).
-2. The bot downloads the file, saves a copy under `DATA_DIR`, and merges new accounts into the pool.
-3. It replies with how many new accounts were added and how many were skipped (already given / already in pool).
-
----
-
 ## Data & privacy
 
 All state lives in `DATA_DIR` (default `./data`):
 
-- `db.json` – pools, the given‑accounts registry, per‑user usage counts, and role memory.
-- `steam.txt` / `fivem.txt` – the most recent uploaded files.
+- `db.json` – tickets, role memory, the account pools for `/combo`, settings and the saved copies of `/lock` and `/sos`.
+- `sos/` – the backup file of every `/sos start`, and `transcripts/` when the own website hosts them.
 
 When the bot starts it prints `Data: … (loaded)` or `(new, nothing was saved before)`. If it says
 **new** after a restart, the host is not keeping the data folder, and tickets, remembered roles and the
@@ -459,7 +430,7 @@ src/
   deploy-commands.js     # registers slash commands with Discord
   storage.js             # atomic JSON database
   services/
-    accounts.js          # account pools (never-repeat), refills, usage stats
+    accounts.js          # account pools (never-repeat) for /combo
     cooldown.js          # per-user command cooldowns
     roleMemory.js        # auto role + remembered roles
     antinuke.js          # bans anyone who deletes too many channels
@@ -469,11 +440,8 @@ src/
     transcriptMedia.js   # downloads the pictures into it
     transcriptHost.js    # puts it online (R2 or the own website)
   commands/
-    steam.js  fivem.js   # /steam  /5m
-    refills.js refill5.js# /refills  /refill5
-    nuke.js              # /n (delete all channels, keep "zavrseno")
-    stats.js             # /stats (Rastrošan)
-    autorole.js          # /aa (server owner sets the per-server auto role)
+    combo.js             # /combo
+    stats.js             # /stats (members, boost level, more)
     antinuke.js          # /antinuke (status, on, off)
     ban.js               # /ban (admins, with a reason)
     lock.js unlock.js    # /lock  /unlock

@@ -42,7 +42,7 @@ setInterval(() => cooldown.sweep(), 60_000).unref();
 const services = { config, storage, accounts, roleMemory, tickets, bypass, setup, cooldown };
 
 /**
- * Coalesce bursts of database writes into one. A mass role change (e.g. /f on a big server) fires
+ * Coalesce bursts of database writes into one. A mass role change on a big server fires
  * one GuildMemberUpdate per member; saving once per event would mean hundreds of full-file writes.
  */
 let saveTimer = null;

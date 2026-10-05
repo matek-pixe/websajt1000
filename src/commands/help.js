@@ -24,11 +24,8 @@ module.exports = {
         field(
           'Verified members',
           lines([
-            entry('/steam', 'Get a Steam account that was never given out'),
-            entry('/5m', 'Get a FiveM account that was never given out'),
             entry('/combo', 'Get a Steam and a FiveM account at once'),
-            entry('/stats', 'Show the Rastrošan board and the top members'),
-            entry('/ping', 'Show the bot latency'),
+            entry('/stats', 'Show the members, the boost level and more about this server'),
             entry('/help', 'Show this list'),
           ]),
         ),
@@ -43,11 +40,8 @@ module.exports = {
           ]),
         ),
         field(
-          'Roles',
+          'Admins',
           lines([
-            entry('/aa', 'Set the role every new member gets, or show it (owner only)'),
-            entry('/f', 'Give or remove a role for every member (admins only)'),
-            entry('/roles', 'Show the roles the bot remembers for a member, even after they left (staff only)'),
             entry('/ban', 'Ban a member and record the reason (admins only)'),
             entry('/lock', 'Lock this channel so only admins and the owner can write (admins only)'),
             entry('/unlock', 'Open a channel that was locked with /lock (admins only)'),
@@ -57,19 +51,11 @@ module.exports = {
           'Server owner',
           lines([
             entry('/setup server', 'Rebuild the server layout and roles after a preview and a confirmation'),
-            entry('/n', 'Delete every channel except zavrseno after a confirmation'),
             entry('/sos', 'Emergency: save the server, hide every channel from everyone but the owner, restore with /sos end'),
             entry('/antinuke', 'Show or switch the anti-nuke protection that bans mass channel deleters'),
           ]),
         ),
-        field(
-          'Manager',
-          lines([
-            entry('/refills', 'Refill the Steam pool from a steam.txt file'),
-            entry('/refill5', 'Refill the FiveM pool from a fivem.txt file'),
-            entry('/b', 'Lift every limit for yourself or a member, or list who has it'),
-          ]),
-        ),
+        field('Manager', lines([entry('/b', 'Lift every limit for yourself or a member, or list who has it')])),
       ],
     });
 

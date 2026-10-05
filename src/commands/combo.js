@@ -8,7 +8,7 @@ const ORDER = ['steam', 'fivem'];
 
 /**
  * /combo: one Steam and one FiveM account together, one below the other.
- * Same rules as /steam and /5m: never-given accounts only, cooldown, bypass, rollback on failure.
+ * Never-given accounts only, cooldown, bypass, rollback on failure.
  */
 module.exports = {
   managerOnly: false,

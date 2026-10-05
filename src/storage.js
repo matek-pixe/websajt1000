@@ -23,7 +23,7 @@ function defaults() {
     // roles.<guildId>.<userId> = { roles: [roleId...], username, updatedAt }
     roles: {},
     // autoRoles.<guildId> = { roleId, setBy, username, at } -> the role new members get,
-    //   chosen by the server owner with /aa. Overrides the AUTO_ROLE_* env defaults.
+    //   the saved auto role of a server. Overrides the AUTO_ROLE_* env defaults.
     autoRoles: {},
     // tickets.<guildId> = { counter, categoryId, staffRoleId, transcript: { index, count },
     //   tickets: { <channelId>: {...} }, users: { <userId>: { lastClosedAt } } }
