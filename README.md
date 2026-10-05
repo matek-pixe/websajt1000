@@ -19,6 +19,7 @@ gives everyone an **auto role** on join, **remembers each member's roles** by th
 | `/antinuke [mode]` | **server owner** | Shows or switches the anti-nuke protection of this server (on by default). See *Anti-nuke* below. |
 | `/aa` | **server owner** | Sets the role every new member gets on **this** server, e.g. `/aa @Member`. Run with no role to see the current setting. |
 | `/f role` | **admins** | Gives a role to **every member** of the server (bots skipped unless `bots:true`). `action:Remove` takes it away from everyone. Shows progress and a summary. |
+| `/priv` | **admins** | Creates the **priv** role (once, no permissions of its own) and opens the private category `PRIV_CATEGORY_ID` for it: the role can see the category, write in its text channels and join and speak in its voice channels. Give the role to members to let them in. Only adds an allow for that role, nobody else's permissions change. Running it again reuses the role. |
 | `/lock` | **admins** | Locks the channel it is written in: only admins and the server owner can write there, everyone else cannot. Posts a **Channel locked** card. |
 | `/unlock` | **admins** | Opens a channel locked with `/lock` and puts its permissions back exactly as they were. |
 | `/sos start` · `/sos end` · `/sos status` | **server owner** | Emergency button. `start` saves the whole server, then hides every channel from everyone except the owner. `end` puts every channel and role back exactly as it was and proves it. See *Lock and SOS* below. |
@@ -477,6 +478,7 @@ src/
     antinuke.js          # /antinuke (status, on, off)
     ban.js               # /ban (admins, with a reason)
     lock.js unlock.js    # /lock  /unlock
+    priv.js              # /priv (the priv role and its category)
     sos.js               # /sos start | end | status
     ticketAlert.js       # /ticketalert (test the alerts)
 test/                    # unit tests

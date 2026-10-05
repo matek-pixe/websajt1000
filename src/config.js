@@ -76,6 +76,12 @@ const config = {
     },
   },
 
+  // /priv: the role it makes and the category that role opens (text and voice).
+  priv: {
+    categoryId: (env.PRIV_CATEGORY_ID || '1554450056336375878').trim(),
+    roleName: (env.PRIV_ROLE_NAME || 'priv').trim() || 'priv',
+  },
+
   // Anti-nuke: whoever deletes more than maxChannels channels within windowMs is warned by DM and
   // banned. The server owner, the manager, this bot and trustedIds are never touched.
   antiNuke: {

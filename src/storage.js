@@ -41,6 +41,8 @@ function defaults() {
     // sos.<guildId> = { active, phase, startedAt, startedBy, snapshot, added, stripped, backupFile, failed }
     //   -> the whole server as it was before /sos start. Kept until /sos end has put everything back.
     sos: {},
+    // priv.<guildId> = { roleId, at } -> the priv role /priv made, remembered even if it is renamed.
+    priv: {},
   };
 }
 
@@ -82,6 +84,7 @@ function sanitize(data) {
   if (!isPlainObject(data.setup)) data.setup = {};
   if (!isPlainObject(data.locks)) data.locks = {};
   if (!isPlainObject(data.sos)) data.sos = {};
+  if (!isPlainObject(data.priv)) data.priv = {};
   return data;
 }
 
