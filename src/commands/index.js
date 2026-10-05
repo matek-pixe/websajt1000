@@ -17,7 +17,7 @@ const modules = [
   require('./setup'),
   require('./antinuke'),
   require('./ban'),
-  require('./priv'),
+  require('./fix'),
   require('./lock'),
   require('./unlock'),
   require('./sos'),

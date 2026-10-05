@@ -49,7 +49,7 @@ module.exports = {
             entry('/f', 'Give or remove a role for every member (admins only)'),
             entry('/roles', 'Show the roles the bot remembers for a member, even after they left (staff only)'),
             entry('/ban', 'Ban a member and record the reason (admins only)'),
-            entry('/priv', 'Set up the priv, staff and member roles in one go (admins only)'),
+            entry('/fix', 'Give everyone the member role and make sure new people can see the verify category (admins only)'),
             entry('/lock', 'Lock this channel so only admins and the owner can write (admins only)'),
             entry('/unlock', 'Open a channel that was locked with /lock (admins only)'),
           ]),

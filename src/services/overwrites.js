@@ -18,7 +18,7 @@ const VIEW = P.ViewChannel;
 const WRITE = P.SendMessages | P.SendMessagesInThreads | P.CreatePublicThreads | P.CreatePrivateThreads;
 const ADMIN = P.Administrator;
 
-const big = (v) => BigInt(v || 0);
+const big = (v) => (v && typeof v === 'object' && 'bitfield' in v ? BigInt(v.bitfield) : BigInt(v || 0));
 const raw = (o) => ({ id: String(o.id), type: Number(o.type), allow: String(big(o.allow)), deny: String(big(o.deny)) });
 const overwritesOf = (apiChannel) => (apiChannel.permission_overwrites || []).map(raw);
 const sameBits = (a, b) => !!a && !!b && a.id === b.id && a.type === b.type && big(a.allow) === big(b.allow) && big(a.deny) === big(b.deny);
@@ -150,15 +150,16 @@ async function takeSnapshot(rest, guild) {
 // ---------- who can see what ----------
 
 /**
- * Can this member see this channel? Discord's own order: base permissions, then the @everyone
+ * What a member can do in a channel, in Discord's own order: base permissions, then the @everyone
  * overwrite, then the member's role overwrites together, then their own overwrite.
  */
-function memberCanView({ memberId, roleIds = [], roles, channel, everyoneId, ownerId }) {
-  if (memberId && memberId === ownerId) return true;
+function memberPerms({ memberId, roleIds = [], roles, channel, everyoneId, ownerId }) {
+  const ALL = (1n << 64n) - 1n;
+  if (memberId && memberId === ownerId) return ALL;
   const byId = new Map(roles.map((r) => [r.id, r]));
   let perms = big((byId.get(everyoneId) || {}).permissions);
   for (const id of roleIds) perms |= big((byId.get(id) || {}).permissions);
-  if (perms & ADMIN) return true;
+  if (perms & ADMIN) return ALL;
   const ow = new Map(channel.overwrites.map((o) => [o.id, o]));
   const ev = ow.get(everyoneId);
   if (ev) perms = (perms & ~big(ev.deny)) | big(ev.allow);
@@ -174,8 +175,17 @@ function memberCanView({ memberId, roleIds = [], roles, channel, everyoneId, own
   perms = (perms & ~deny) | allow;
   const mine = memberId && ow.get(memberId);
   if (mine && mine.type === MEMBER) perms = (perms & ~big(mine.deny)) | big(mine.allow);
-  return !!(perms & VIEW);
+  return perms;
 }
+
+/** Can this member see this channel? */
+const memberCanView = (args) => !!(memberPerms(args) & VIEW);
+
+/** Can this member see the channel and read what is in it? (Without seeing it there is nothing else.) */
+const memberCanRead = (args) => {
+  const perms = memberPerms(args);
+  return !!(perms & VIEW) && !!(perms & P.ReadMessageHistory);
+};
 
 /** Roles that can see the channel on their own, and whether @everyone can. */
 function whoSees(channel, roles, everyoneId) {
@@ -208,6 +218,8 @@ module.exports = {
   isLostTarget,
   mismatches,
   takeSnapshot,
+  memberPerms,
   memberCanView,
+  memberCanRead,
   whoSees,
 };

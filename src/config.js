@@ -76,15 +76,9 @@ const config = {
     },
   },
 
-  // /priv: the role it makes and the category that role opens (text and voice).
-  priv: {
-    categoryId: (env.PRIV_CATEGORY_ID || '1554450056336375878').trim(),
-    roleName: (env.PRIV_ROLE_NAME || 'priv').trim() || 'priv',
-    // The staff role (only Kick Members) opens these categories.
-    staffCategoryIds: listOf(env.PRIV_STAFF_CATEGORY_IDS || '1554450100728762408,1554450096551370822'),
-    staffRoleName: (env.PRIV_STAFF_ROLE_NAME || 'staff').trim() || 'staff',
-    // The role every member gets, written like this whatever AUTO_ROLE_NAME says.
-    memberRoleName: (env.PRIV_MEMBER_ROLE_NAME || 'member').trim() || 'member',
+  // /fix: how the role every member gets is written (only capitals are ever corrected).
+  fix: {
+    memberRoleName: (env.MEMBER_ROLE_NAME || 'member').trim() || 'member',
   },
 
   // Anti-nuke: whoever deletes more than maxChannels channels within windowMs is warned by DM and
