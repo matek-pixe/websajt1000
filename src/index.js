@@ -37,7 +37,7 @@ const roleMemory = new RoleMemoryService(storage, config.autoRole);
 const tickets = new TicketService(storage, config);
 const bypass = new BypassService(storage, config);
 const setup = new SetupService(storage, config, tickets, roleMemory);
-const priv = new PrivService(storage, config);
+const priv = new PrivService(storage, config, { roleMemory, setup, tickets });
 const cooldown = new Cooldown(config.cooldownMs);
 setInterval(() => cooldown.sweep(), 60_000).unref();
 

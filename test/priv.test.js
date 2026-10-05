@@ -3,156 +3,376 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
-const { PermissionFlagsBits: P } = require('discord.js');
+const { PermissionFlagsBits: P, PermissionsBitField } = require('discord.js');
 const { Storage } = require('../src/storage');
+const { RoleMemoryService } = require('../src/services/roleMemory');
 const { PrivService, GRANT } = require('../src/services/priv');
 const priv = require('../src/commands/priv');
 const { refusal } = require('../src/gates');
 const { commands } = require('../src/commands');
 const { tmpDir, rm } = require('./helpers');
 
-const CAT = '1554450056336375878';
-const CFG = { priv: { categoryId: CAT, roleName: 'priv' } };
+const PRIV_CAT = '1554450056336375878';
+const VIP_CAT = '1554450096551370822';
+const STAFF_CAT = '1554450100728762408';
+const CFG = {
+  priv: { categoryId: PRIV_CAT, roleName: 'priv', staffCategoryIds: [STAFF_CAT, VIP_CAT], staffRoleName: 'staff', memberRoleName: 'member' },
+  autoRole: { id: '', name: 'member' },
+  setup: { sensitiveRoleId: 'SENSITIVE', protectedRoleIds: [] },
+  web: { roleIds: ['WEBROLE'] },
+};
 
-/** A small server: the private category with two channels, another category with one, some roles. */
-function mk({ botPerms = null, failOn = null } = {}) {
+/**
+ * A small server with its roles, members and channels, and just enough of discord.js's behaviour:
+ * roles that list their members, permission edits that are recorded, role changes that really happen.
+ */
+/** discord.js collections are Maps with a few helpers. */
+class Coll extends Map {
+  find(fn) {
+    for (const v of this.values()) if (fn(v)) return v;
+    return undefined;
+  }
+}
+
+function mk({ botPerms = null, botTop = 50, failEdit = null, failGive = null, extraRoles = [], extraChannels = [], memberCount = 6 } = {}) {
   const dir = tmpDir();
   const storage = new Storage(path.join(dir, 'db.json'));
-  const svc = new PrivService(storage, CFG);
+  const members = new Map();
+  const roles = new Coll();
   const edits = [];
-  const chan = (id, name, type, parentId = null) => ({
+  const log = [];
+
+  const addRole = (spec) => {
+    const role = {
+      managed: false,
+      position: 5,
+      ...spec,
+      permissions: new PermissionsBitField(BigInt(spec.perms || 0)),
+      get members() {
+        return new Map([...members.values()].filter((m) => m.roles.cache.has(role.id)).map((m) => [m.id, m]));
+      },
+      async setName(name) { log.push(`rename ${role.id} ${role.name} -> ${name}`); role.name = name; },
+      async delete() {
+        log.push(`delete ${role.id}`);
+        // everyone must already have the member role when a duplicate goes
+        log.push(`humans without keep at delete: ${[...members.values()].filter((m) => !m.user.bot && !m.roles.cache.has('KEEP') && !m.roles.cache.has('M1')).length}`);
+        roles.delete(role.id);
+        for (const m of members.values()) m.roles.cache.delete(role.id);
+      },
+    };
+    roles.set(role.id, role);
+    return role;
+  };
+  const addMember = (id, roleIds = [], bot = false) => {
+    const m = { id, user: { bot, tag: `${id}#0`, username: id }, roles: { cache: new Map() } };
+    m.roles.add = async (rid) => {
+      if (failGive === id) throw new Error('Missing Permissions');
+      m.roles.cache.set(rid, roles.get(rid));
+      log.push(`give ${id} ${rid}`);
+    };
+    for (const r of roleIds) m.roles.cache.set(r, roles.get(r));
+    members.set(id, m);
+    return m;
+  };
+
+  addRole({ id: 'G', name: '@everyone', position: 0 });
+  addRole({ id: 'M1', name: 'Member', position: 3 }); // the role the bot gives today
+  for (const r of extraRoles) addRole(r);
+  for (let i = 1; i <= memberCount; i++) addMember(`U${i}`, i <= 3 ? ['M1'] : []);
+  addMember('BOTUSER', [], true);
+
+  const chan = (id, name, type, parentId = null, overwriteIds = []) => ({
     id,
     name,
     type,
     parentId,
     permissionOverwrites: {
+      cache: new Map(overwriteIds.map((x) => [x, {}])),
       edit: async (role, allow, opts) => {
-        if (failOn === id) throw new Error('Missing Permissions');
+        if (failEdit === id) throw new Error('Missing Permissions');
         edits.push({ channel: id, role: role.id, allow, reason: opts && opts.reason });
       },
     },
   });
-  const roles = new Map([['R-existing', { id: 'R-existing', name: 'Member', managed: false }]]);
+  const channels = new Map(
+    [
+      chan(PRIV_CAT, 'PRIVATE', 4),
+      chan('p1', 'priv-chat', 0, PRIV_CAT),
+      chan(STAFF_CAT, 'STAFF', 4),
+      chan('s1', 'staff-news', 0, STAFF_CAT),
+      chan('s2', 'staff voice', 2, STAFF_CAT),
+      chan(VIP_CAT, 'VIP', 4),
+      chan('v1', 'vip-chat', 0, VIP_CAT),
+      chan('g-cat', 'GENERAL', 4),
+      chan('g1', 'chat', 0, 'g-cat'),
+      ...extraChannels.map((c) => chan(c.id, c.name, c.type ?? 0, c.parentId ?? 'g-cat', c.overwriteIds || [])),
+    ].map((c) => [c.id, c]),
+  );
+
   const created = [];
   const guild = {
     id: 'G',
+    name: 'Test',
     roles: {
       cache: roles,
       create: async (o) => {
-        const role = { id: `R-new${created.length + 1}`, managed: false, ...o };
-        created.push(o);
-        roles.set(role.id, role);
+        const role = addRole({ id: `NEW${created.length + 1}`, name: o.name, position: 1, perms: (o.permissions || []).reduce((a, b) => a | b, 0n) });
+        created.push({ ...o, id: role.id });
+        log.push(`create ${role.id} ${o.name}`);
         return role;
       },
     },
-    channels: {
-      cache: new Map([
-        [CAT, chan(CAT, 'PRIVATE', 4)],
-        ['t1', chan('t1', 'priv-chat', 0, CAT)],
-        ['v1', chan('v1', 'priv voice', 2, CAT)],
-        ['other-cat', chan('other-cat', 'GENERAL', 4)],
-        ['t2', chan('t2', 'chat', 0, 'other-cat')],
-      ]),
+    channels: { cache: channels },
+    members: {
+      cache: members,
+      fetch: async () => members,
+      fetchMe: async () => guild.members.me,
+      me: { permissions: { has: (f) => (botPerms ? botPerms.includes(f) : true) }, roles: { highest: { position: botTop } } },
     },
-    members: { me: { permissions: { has: (f) => (botPerms ? botPerms.includes(f) : true) } } },
   };
-  return { svc, guild, edits, created, storage, done: () => rm(dir) };
+  const roleMemory = new RoleMemoryService(storage, CFG.autoRole);
+  const svc = new PrivService(storage, CFG, { roleMemory, setup: { getVerifiedRoleId: () => 'VERIFIED' }, tickets: { getStaffRole: () => 'TICKETSTAFF' } });
+  return { svc, guild, edits, created, log, roles, members, channels, storage, roleMemory, dir, done: () => rm(dir) };
 }
 
-test('the priv role is made once, with no permissions of its own, and remembered', async () => {
-  const k = mk();
+const BY = { id: 'ADMIN', tag: 'admin#0', username: 'admin' };
+
+// ---------- plan ----------
+
+test('plan: the roles and what they open, and how the member roles are sorted', async () => {
+  const k = mk({
+    extraRoles: [
+      { id: 'M2', name: 'member', position: 2 }, // empty duplicate: goes
+      { id: 'M3', name: ' MEMBER ', position: 2 }, // duplicate with a spare permission: stays
+      { id: 'M4', name: 'Member', position: 2 }, // used in a channel's permissions: stays
+      { id: 'VERIFIED', name: 'member', position: 2 }, // the verified role: protected
+      { id: 'M5', name: 'Member', position: 90 }, // above the bot: stays
+      { id: 'MBOT', name: 'member', managed: true, position: 2 }, // a bot role: not even a candidate
+    ],
+    extraChannels: [{ id: 'x1', name: 'rooms', overwriteIds: ['M4'] }],
+  });
   try {
-    const first = await k.svc.ensureRole(k.guild, 'r');
-    assert.equal(first.created, true);
-    assert.equal(first.role.name, 'priv');
-    assert.deepEqual(k.created[0].permissions, []);
-    assert.equal(k.created[0].hoist, false);
-    assert.equal(k.created[0].mentionable, false);
-    assert.equal(k.svc.roleId('G'), first.role.id);
-    assert.equal(new PrivService(new Storage(k.storage.file), CFG).roleId('G'), first.role.id, 'survives a restart');
+    k.roles.get('M3').permissions = new PermissionsBitField(P.KickMembers);
+    const plan = await k.svc.plan(k.guild);
+    assert.deepEqual(plan.problems, []);
+    assert.equal(plan.priv.category.id, PRIV_CAT);
+    assert.equal(plan.priv.channels, 1);
+    assert.equal(plan.priv.role, null);
+    assert.deepEqual(plan.staff.categories.map((c) => c.id), [STAFF_CAT, VIP_CAT]);
+    assert.equal(plan.staff.channels, 3);
+    assert.deepEqual(plan.staffMissing, []);
 
-    const second = await k.svc.ensureRole(k.guild, 'r');
-    assert.equal(second.created, false);
-    assert.equal(second.role.id, first.role.id);
-    assert.equal(k.created.length, 1, 'never a second role');
-
-    // renamed afterwards: still found by the remembered id
-    k.guild.roles.cache.get(first.role.id).name = 'VIP lounge';
-    assert.equal((await k.svc.ensureRole(k.guild, 'r')).role.id, first.role.id);
-    assert.equal(k.created.length, 1);
+    const m = plan.member;
+    assert.equal(m.keep.id, 'M1', 'the one with the most members is kept');
+    assert.equal(m.rename, true);
+    const by = Object.fromEntries(m.dups.map((d) => [d.id, d]));
+    assert.equal(by.M2.action, 'delete');
+    assert.match(by.M3.reason, /permissions the kept role lacks/);
+    assert.match(by.M4.reason, /used in 1 channel permission$/);
+    assert.equal(by.VERIFIED.reason, 'the verified role');
+    assert.equal(by.M5.reason, 'above my highest role');
+    assert.ok(!by.MBOT, 'a role owned by a bot is never touched');
+    assert.equal(m.giveTo, 3, 'U4 U5 U6 lack it, the bot user is skipped');
+    assert.equal(m.total, 6);
+    assert.equal(k.created.length, 0, 'planning changes nothing');
   } finally {
     k.done();
   }
 });
 
-test('a role that is already called priv is used, but a bot role with that name is not', async () => {
-  const k = mk();
+test('plan: the role new members get decides what is kept, and a differently named one is left alone', async () => {
+  const k = mk({ extraRoles: [{ id: 'M2', name: 'member', position: 2 }] });
   try {
-    k.guild.roles.cache.set('bot', { id: 'bot', name: 'priv', managed: true });
-    const made = await k.svc.ensureRole(k.guild, 'r');
-    assert.equal(made.created, true, 'a managed role cannot be given to people');
-    k.guild.roles.cache.delete(made.role.id);
-    k.guild.roles.cache.set('mine', { id: 'mine', name: 'Priv', managed: false });
-    const again = await new PrivService(new Storage(path.join(tmpDir(), 'other.json')), CFG).ensureRole(k.guild, 'r');
-    assert.equal(again.role.id, 'mine');
-    assert.equal(again.created, false);
+    k.roleMemory.setGuildAutoRole('G', 'M2', { id: 'x', username: 'x' });
+    const plan = await k.svc.plan(k.guild);
+    assert.equal(plan.member.keep.id, 'M2', 'the /aa role wins even with fewer members');
+    assert.equal(plan.member.dups.find((d) => d.id === 'M1').action, 'delete');
+
+    k.roleMemory.setGuildAutoRole('G', 'M1', { id: 'x', username: 'x' });
+    k.roles.get('M1').name = 'Players';
+    const other = await k.svc.plan(k.guild);
+    assert.match(other.member.skip, /The role new members get is Players, so I leave the member roles alone/);
   } finally {
     k.done();
   }
 });
 
-test('the role gets its access on the category and on every channel inside it, and nowhere else', async () => {
+test('plan: with no member role at all one is created, and problems stop everything', async () => {
   const k = mk();
   try {
-    const { role } = await k.svc.ensureRole(k.guild, 'r');
-    const res = await k.svc.grant(k.guild, k.svc.category(k.guild), role, 'why');
-    assert.deepEqual(res.done, ['PRIVATE', 'priv-chat', 'priv voice']);
-    assert.deepEqual(k.edits.map((e) => e.channel), [CAT, 't1', 'v1'], 'not the other category and not its channel');
+    k.roles.delete('M1');
+    for (const m of k.members.values()) m.roles.cache.delete('M1');
+    const plan = await k.svc.plan(k.guild);
+    assert.equal(plan.member.create, true);
+    assert.equal(plan.member.giveTo, 6);
+    k.guild.members.me.permissions.has = () => false;
+    assert.match((await k.svc.plan(k.guild)).problems[0], /Manage Roles/);
+  } finally {
+    k.done();
+  }
+});
+
+test('plan: categories that are not on the server are named, and the parts that do not apply are dropped', async () => {
+  const k = mk();
+  try {
+    k.channels.delete(PRIV_CAT);
+    k.channels.delete(VIP_CAT);
+    const plan = await k.svc.plan(k.guild);
+    assert.equal(plan.priv, null);
+    assert.equal(plan.privMissing, PRIV_CAT);
+    assert.deepEqual(plan.staffMissing, [VIP_CAT]);
+    assert.deepEqual(plan.staff.categories.map((c) => c.id), [STAFF_CAT]);
+    k.channels.delete(STAFF_CAT);
+    assert.equal((await k.svc.plan(k.guild)).staff, null);
+  } finally {
+    k.done();
+  }
+});
+
+// ---------- execute ----------
+
+test('execute: priv has no permissions, staff has only Kick Members, each opens its own categories', async () => {
+  const k = mk();
+  try {
+    const plan = await k.svc.plan(k.guild);
+    const res = await k.svc.execute(k.guild, plan, BY);
+    assert.equal(res.ok, true);
+
+    const [privMade, staffMade] = k.created;
+    assert.deepEqual([privMade.name, privMade.permissions], ['priv', []]);
+    assert.deepEqual([staffMade.name, staffMade.permissions], ['staff', [P.KickMembers]], 'the only permission is Kick Members');
+    assert.equal(staffMade.hoist, false);
+    assert.equal(staffMade.mentionable, false);
+
+    const forRole = (id) => k.edits.filter((e) => e.role === id).map((e) => e.channel);
+    assert.deepEqual(forRole(res.priv.role.id), [PRIV_CAT, 'p1']);
+    assert.deepEqual(forRole(res.staff.role.id), [STAFF_CAT, 's1', 's2', VIP_CAT, 'v1']);
+    assert.ok(!k.edits.some((e) => e.channel === 'g1' || e.channel === 'g-cat'), 'no other channel is touched');
     for (const e of k.edits) {
-      assert.equal(e.role, role.id);
-      assert.equal(e.reason, 'why');
-      for (const key of ['ViewChannel', 'SendMessages', 'ReadMessageHistory', 'Connect', 'Speak']) assert.equal(e.allow[key], true, key);
-      assert.ok(Object.values(e.allow).every((v) => v === true), 'only allows, nothing is denied or removed');
+      assert.ok(['ViewChannel', 'SendMessages', 'Connect', 'Speak'].every((f) => e.allow[f] === true));
+      assert.ok(Object.values(e.allow).every((v) => v === true), 'only allows');
     }
-    assert.deepEqual(res.skipped, []);
+    assert.equal(k.svc.roleId('G'), res.priv.role.id);
+    assert.equal(k.svc.staffRoleId('G'), res.staff.role.id);
+    assert.deepEqual(res.priv.skipped, []);
   } finally {
     k.done();
   }
 });
 
-test('what the bot does not hold itself is not granted, and is reported', async () => {
-  const k = mk({ botPerms: [P.ViewChannel, P.SendMessages, P.ReadMessageHistory, P.Connect, P.ManageRoles] });
+test('execute: the member role is renamed, remembered, given to everyone and the empty duplicates are deleted', async () => {
+  const k = mk({ extraRoles: [{ id: 'M2', name: 'member', position: 2 }, { id: 'M3', name: 'MEMBER', position: 2 }] });
   try {
-    const { role } = await k.svc.ensureRole(k.guild, 'r');
-    const res = await k.svc.grant(k.guild, k.svc.category(k.guild), role, 'r');
-    assert.deepEqual(Object.keys(k.edits[0].allow).sort(), ['Connect', 'ReadMessageHistory', 'SendMessages', 'ViewChannel']);
-    assert.ok(res.skipped.includes('Speak') && res.skipped.includes('Stream'));
-    assert.equal(res.failed.length, 0);
+    k.roles.get('M3').permissions = new PermissionsBitField(P.BanMembers);
+    // two people only have a duplicate
+    k.members.get('U5').roles.cache.set('M2', k.roles.get('M2'));
+    const plan = await k.svc.plan(k.guild);
+    const res = await k.svc.execute(k.guild, plan, BY);
+    const m = res.member;
+
+    assert.equal(m.renamed, true);
+    assert.equal(k.roles.get('M1').name, 'member', 'written in small letters');
+    assert.equal(k.roleMemory.getGuildAutoRole('G'), 'M1', 'the bot gives exactly this role to new members');
+    for (const [id, member] of k.members) if (!member.user.bot) assert.ok(member.roles.cache.has('M1'), `${id} has it`);
+    assert.ok(!k.members.get('BOTUSER').roles.cache.has('M1'), 'bots are skipped');
+    assert.equal(m.given, 3);
+    assert.equal(m.already, 3);
+    assert.deepEqual(m.deleted.map((d) => d.name), ['member']);
+    assert.ok(!k.roles.has('M2') && k.roles.has('M3'), 'only the empty duplicate is deleted');
+    assert.deepEqual(m.kept, [{ name: 'MEMBER', reason: 'has permissions the kept role lacks' }]);
+
+    const del = k.log.findIndex((l) => l === 'delete M2');
+    assert.ok(del > k.log.findLastIndex((l) => l.startsWith('give ')), 'everyone got the role before a duplicate was deleted');
+    assert.equal(k.log[del + 1], 'humans without keep at delete: 0');
   } finally {
     k.done();
   }
 });
 
-test('a channel that cannot be changed is named, and the others are still done', async () => {
-  const k = mk({ failOn: 't1' });
+test('execute: an existing staff role keeps its permissions, and a role that already exists is not made again', async () => {
+  const k = mk({ extraRoles: [{ id: 'ST', name: 'Staff', position: 2, perms: P.KickMembers | P.ManageMessages }] });
   try {
-    const { role } = await k.svc.ensureRole(k.guild, 'r');
-    const res = await k.svc.grant(k.guild, k.svc.category(k.guild), role, 'r');
-    assert.deepEqual(res.done, ['PRIVATE', 'priv voice']);
-    assert.deepEqual(res.failed, [{ name: 'priv-chat', error: 'Missing Permissions' }]);
+    const first = await k.svc.execute(k.guild, await k.svc.plan(k.guild), BY);
+    assert.equal(first.staff.created, false);
+    assert.deepEqual(first.staff.extra, ['ManageMessages']);
+    assert.equal(k.roles.get('ST').permissions.has(P.ManageMessages), true, 'its permissions were not changed');
+    assert.deepEqual(k.created.map((c) => c.name), ['priv']);
+
+    const again = await k.svc.execute(k.guild, await k.svc.plan(k.guild), BY);
+    assert.equal(again.priv.created, false, 'running it again reuses the roles');
+    assert.deepEqual(k.created.map((c) => c.name), ['priv']);
   } finally {
     k.done();
   }
 });
 
-test('the category must be on this server, and be a category', () => {
+test('execute: only roles that were in the preview are deleted, and one that is used since is kept', async () => {
+  const k = mk({ extraRoles: [{ id: 'M2', name: 'member', position: 2 }] });
+  try {
+    const approved = await k.svc.plan(k.guild);
+    k.roles.set('M9', { id: 'M9', name: 'member', managed: false, position: 2, permissions: new PermissionsBitField(0n), members: new Map(), delete: async () => k.roles.delete('M9') }); // appears after the preview
+    k.channels.get('g1').permissionOverwrites.cache.set('M2', {}); // M2 is used by a channel since the preview
+    const res = await k.svc.execute(k.guild, approved, BY);
+    assert.ok(k.roles.has('M9'), 'a role that was not in the preview is never deleted');
+    assert.ok(k.roles.has('M2'), 'a role that is used by a channel now is kept');
+    assert.deepEqual(res.member.deleted, []);
+    assert.deepEqual(res.member.kept.map((x) => x.name).sort(), ['member', 'member']);
+  } finally {
+    k.done();
+  }
+});
+
+test('execute: failures are named and never stop the rest; a bot that lacks a permission does not grant it', async () => {
+  const k = mk({ failEdit: 's2', failGive: 'U4', botPerms: [P.ManageRoles, P.ViewChannel, P.SendMessages, P.ReadMessageHistory, P.Connect] });
+  try {
+    const res = await k.svc.execute(k.guild, await k.svc.plan(k.guild), BY);
+    assert.deepEqual(res.staff.failed, [{ name: 'staff voice', error: 'Missing Permissions' }]);
+    assert.ok(res.staff.done.includes('vip-chat'), 'the other channels were still done');
+    assert.ok(res.priv.skipped.includes('Speak'));
+    assert.ok(!('Speak' in k.edits[0].allow));
+    assert.equal(res.member.failedCount, 1);
+    assert.match(res.member.failed[0], /U4#0: Missing Permissions/);
+    assert.equal(res.member.given, 2);
+  } finally {
+    k.done();
+  }
+});
+
+test('execute: a second run at the same time is refused', async () => {
   const k = mk();
   try {
-    assert.equal(k.svc.category(k.guild).id, CAT);
-    k.guild.channels.cache.delete(CAT);
-    assert.equal(k.svc.category(k.guild), null);
-    k.guild.channels.cache.set(CAT, { id: CAT, type: 0 });
-    assert.equal(k.svc.category(k.guild), null, 'a text channel with that id is not a category');
+    const plan = await k.svc.plan(k.guild);
+    const [a, b] = await Promise.all([k.svc.execute(k.guild, plan, BY), k.svc.execute(k.guild, plan, BY)]);
+    assert.deepEqual([a.ok, b.reason].sort(), ['busy', true].sort());
+  } finally {
+    k.done();
+  }
+});
+
+test('the confirmation only works once, for the person who asked, in time', async () => {
+  const k = mk();
+  try {
+    const plan = await k.svc.plan(k.guild);
+    const t = k.svc.createPending('ADMIN', 'G', plan);
+    assert.equal(k.svc.takePending(t, { guildId: 'G', userId: 'OTHER' }), null);
+    assert.equal(k.svc.takePending(t, { guildId: 'OTHERG', userId: 'ADMIN' }), null);
+    assert.equal(k.svc.takePending(t, { guildId: 'G', userId: 'ADMIN' }), plan);
+    assert.equal(k.svc.takePending(t, { guildId: 'G', userId: 'ADMIN' }), null, 'used once');
+    const late = k.svc.createPending('ADMIN', 'G', plan);
+    k.svc.pending.get(late).expires = Date.now() - 1;
+    assert.equal(k.svc.takePending(late, { guildId: 'G', userId: 'ADMIN' }), null);
+  } finally {
+    k.done();
+  }
+});
+
+test('the role memory finds the member role whatever its capitals, so it is never made twice', async () => {
+  const k = mk();
+  try {
+    k.roles.get('M1').name = 'MEMBER';
+    const role = await k.roleMemory.ensureAutoRole(k.guild);
+    assert.equal(role.id, 'M1');
+    assert.equal(k.created.length, 0);
   } finally {
     k.done();
   }
@@ -160,77 +380,133 @@ test('the category must be on this server, and be a category', () => {
 
 // ---------- the command ----------
 
-function run(k, { user = 'ADMIN' } = {}) {
-  const replies = [];
-  let refunds = 0;
+function fakeInteraction(k, { user = 'ADMIN', customId = null, perms = { has: () => true } } = {}) {
+  const log = { replies: [], updates: [], dms: [] };
   const i = {
     guild: k.guild,
-    user: { id: user, tag: 'admin#0' },
+    guildId: 'G',
+    user: { id: user, tag: 'admin#0', username: 'admin', send: async (p) => log.dms.push(p) },
+    memberPermissions: perms,
+    customId,
     deferred: false,
     replied: false,
     deferReply: async () => { i.deferred = true; },
-    editReply: async (p) => replies.push(p),
-    reply: async (p) => { i.replied = true; replies.push(p); },
+    editReply: async (p) => log.replies.push(p),
+    reply: async (p) => { i.replied = true; log.replies.push(p); },
+    update: async (p) => log.updates.push(p),
   };
-  const ctx = { priv: k.svc, config: CFG, refundCooldown: () => { refunds += 1; } };
-  return { go: () => priv.execute(i, ctx), replies, refunds: () => refunds };
+  return { i, log };
 }
-const card = (r) => r.replies[0].embeds[0].toJSON();
+const ctxFor = (k) => {
+  const posted = [];
+  let held = 0;
+  let released = 0;
+  return { posted, state: () => ({ held, released }), ctx: { priv: k.svc, isManager: () => false, logs: { hold: () => { held += 1; return () => { released += 1; }; }, post: (g, e) => posted.push(e.toJSON()) } } };
+};
+const embed = (p) => p.embeds[0].toJSON();
+const fieldOf = (e, name) => (e.fields.find((f) => f.name === name) || {}).value;
 
-test('/priv: makes the role, opens the category and says so', async () => {
-  const k = mk();
+test('/priv: a preview of everything, nothing changed, and two buttons', async () => {
+  const k = mk({ extraRoles: [{ id: 'M2', name: 'member', position: 2 }] });
   try {
-    const r = run(k);
-    await r.go();
-    const e = card(r);
-    assert.equal(e.title, 'Priv role created');
-    assert.match(e.description, /<@&R-new1> can see \*\*PRIVATE\*\*, write in its text channels and join and speak in its voice channels/);
-    assert.equal(e.fields.find((f) => f.name === 'Opened').value, '3 channels (the category and 2 inside)');
-    assert.equal(k.edits.length, 3);
-    assert.equal(r.refunds(), 0);
-
-    const again = run(k);
-    await again.go();
-    assert.equal(card(again).title, 'Priv role updated', 'running it again reuses the role');
-    assert.equal(k.created.length, 1);
+    const { i, log } = fakeInteraction(k);
+    const { ctx } = ctxFor(k);
+    await priv.execute(i, ctx);
+    const e = embed(log.replies[0]);
+    assert.equal(e.title, 'Priv setup preview');
+    assert.match(e.description, /Nothing has changed yet/);
+    assert.match(e.description, /Deleted roles cannot be brought back/);
+    assert.match(fieldOf(e, 'Priv role'), /A role called priv will be created, with no permissions of its own\. It opens \*\*PRIVATE\*\* and 1 channel inside/);
+    assert.match(fieldOf(e, 'Staff role'), /created with \*\*only Kick Members\*\*.*\*\*STAFF\*\* and \*\*VIP\*\* and 3 channels inside/);
+    assert.match(fieldOf(e, 'Member role'), /<@&M1> is the one that stays.*renamed from Member to \*\*member\*\*.*New members get exactly this role.*given to 3 of 6 members/);
+    assert.match(fieldOf(e, 'Deleted (1)'), /member, 0 members/);
+    const ids = log.replies[0].components[0].toJSON().components.map((c) => c.custom_id);
+    assert.match(ids[0], /^priv:go:/);
+    assert.equal(k.created.length, 0);
+    assert.equal(k.edits.length, 0);
   } finally {
     k.done();
   }
 });
 
-test('/priv: refuses when the category is missing or the bot cannot manage roles, and refunds the cooldown', async () => {
-  const k = mk();
+test('/priv: Run does it all, mutes the log once and shows the result; Cancel and strangers do nothing', async () => {
+  const k = mk({ extraRoles: [{ id: 'M2', name: 'member', position: 2 }] });
   try {
-    k.guild.channels.cache.delete(CAT);
-    const missing = run(k);
-    await missing.go();
-    assert.match(card(missing).description, new RegExp(`${CAT} was not found on this server`));
-    assert.equal(missing.refunds(), 1);
-    assert.equal(k.created.length, 0, 'no role is made for nothing');
+    const { ctx, posted, state } = ctxFor(k);
+    const first = fakeInteraction(k);
+    await priv.execute(first.i, ctx);
+    const [go, no] = first.log.replies[0].components[0].toJSON().components.map((c) => c.custom_id);
+
+    // Cancel
+    const cancel = fakeInteraction(k, { customId: no });
+    await priv.handleButton(cancel.i, ctx);
+    assert.equal(embed(cancel.log.updates[0]).title, 'Cancelled');
+    assert.equal(k.created.length, 0);
+    const gone = fakeInteraction(k, { customId: go });
+    await priv.handleButton(gone.i, ctx);
+    assert.equal(embed(gone.log.updates[0]).title, 'Preview expired');
+
+    // not an admin
+    const second = fakeInteraction(k);
+    await priv.execute(second.i, ctx);
+    const goId = second.log.replies[0].components[0].toJSON().components[0].custom_id;
+    const noAdmin = fakeInteraction(k, { customId: goId, perms: { has: () => false } });
+    await priv.handleButton(noAdmin.i, ctx);
+    assert.match(embed(noAdmin.log.replies[0]).description, /Only admins can use \/priv/);
+    // somebody else's button
+    const stranger = fakeInteraction(k, { customId: goId, user: 'OTHER' });
+    await priv.handleButton(stranger.i, ctx);
+    assert.equal(embed(stranger.log.updates[0]).title, 'Preview expired');
+    assert.equal(k.created.length, 0);
+
+    // Run
+    const run = fakeInteraction(k, { customId: goId });
+    await priv.handleButton(run.i, ctx);
+    const done = embed(run.log.replies[run.log.replies.length - 1]);
+    assert.equal(done.title, 'Priv setup done');
+    assert.match(fieldOf(done, 'Priv role'), /created\. Opened 2 channels/);
+    assert.match(fieldOf(done, 'Staff role'), /created\. Its only permission is Kick Members\. Opened 5 channels/);
+    assert.match(fieldOf(done, 'Member role'), /renamed\. Given to 3 members, 3 already had it/);
+    assert.match(fieldOf(done, 'Deleted (1)'), /member, 0 members/);
+    assert.deepEqual(state(), { held: 1, released: 1 });
+    assert.equal(posted[0].title, 'Roles set up with /priv');
+    assert.equal(k.roles.get('M1').name, 'member');
+
+    // a result that cannot be shown in the reply goes by DM
+    const third = fakeInteraction(k);
+    await priv.execute(third.i, ctx);
+    const goId3 = third.log.replies[0].components[0].toJSON().components[0].custom_id;
+    const dm = fakeInteraction(k, { customId: goId3 });
+    dm.i.editReply = async () => { throw new Error('Unknown Webhook'); };
+    await priv.handleButton(dm.i, ctx);
+    assert.equal(embed(dm.log.dms[0]).title, 'Priv setup done');
   } finally {
     k.done();
   }
-  const k2 = mk({ botPerms: [P.ViewChannel] });
+});
+
+test('/priv: problems and "nothing to do" are explained before any button', async () => {
+  const k = mk({ botPerms: [P.ViewChannel] });
   try {
-    const r = run(k2);
-    await r.go();
-    assert.match(card(r).description, /Manage Roles/);
-    assert.equal(k2.created.length, 0);
+    const { ctx } = ctxFor(k);
+    const a = fakeInteraction(k);
+    await priv.execute(a.i, ctx);
+    assert.match(embed(a.log.replies[0]).description, /Manage Roles/);
+    assert.equal(a.log.replies[0].components, undefined);
+  } finally {
+    k.done();
+  }
+  const k2 = mk();
+  try {
+    for (const id of [PRIV_CAT, STAFF_CAT, VIP_CAT]) k2.channels.delete(id);
+    k2.roleMemory.setGuildAutoRole('G', 'M1', { id: 'x', username: 'x' });
+    k2.roles.get('M1').name = 'Players';
+    const { ctx } = ctxFor(k2);
+    const b = fakeInteraction(k2);
+    await priv.execute(b.i, ctx);
+    assert.match(embed(b.log.replies[0]).description, /Nothing to do here/);
   } finally {
     k2.done();
-  }
-});
-
-test('/priv: partial failures are listed in an amber card', async () => {
-  const k = mk({ failOn: 'v1' });
-  try {
-    const r = run(k);
-    await r.go();
-    const e = card(r);
-    assert.equal(e.color, 0xfaa61a);
-    assert.match(e.fields.find((f) => f.name === 'Could not change').value, /priv voice: Missing Permissions/);
-  } finally {
-    k.done();
   }
 });
 
@@ -240,8 +516,9 @@ test('/priv is for admins and follows the house format', () => {
   assert.equal(call('OWNER', { has: () => false }), null);
   assert.match(call('MOD', { has: () => false }), /Only admins can use \/priv/);
   const json = priv.data.toJSON();
-  assert.equal(json.name, 'priv');
+  assert.equal(json.description, 'Set up the priv, staff and member roles in one go (admins only)');
   assert.ok(json.description.length <= 100 && !json.description.endsWith('.'));
   assert.deepEqual(json.options || [], []);
   assert.ok(Object.keys(GRANT).includes('Connect') && Object.keys(GRANT).includes('Speak'));
+  assert.equal(priv.noCooldown, true);
 });

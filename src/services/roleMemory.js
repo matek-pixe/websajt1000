@@ -239,7 +239,7 @@ class RoleMemoryService {
       console.warn(`[roles] AUTO_ROLE_ID ${id} not found in guild ${guild.id}; falling back to name "${name}".`);
     }
 
-    const byName = guild.roles.cache.find((r) => r.name === name && !r.managed);
+    const byName = guild.roles.cache.find((r) => r.name.trim().toLowerCase() === name.trim().toLowerCase() && !r.managed && r.id !== guild.id);
     if (byName) return byName;
 
     const me = guild.members.me;
