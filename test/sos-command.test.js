@@ -5,11 +5,11 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { ChannelType, PermissionFlagsBits: P } = require('discord.js');
 const sos = require('../src/commands/sos');
-const lock = require('../src/commands/lock');
-const unlock = require('../src/commands/unlock');
 const { refusal } = require('../src/gates');
 const { commands } = require('../src/commands');
 const { G, VIEW, SEND, ADMIN, ow, kit, typical } = require('./fakeServer');
+const { BackupService } = require('../src/services/backups');
+const { RecoverService } = require('../src/services/recover');
 
 /** The pieces of an interaction these commands touch. */
 function fakeInteraction(k, { user = 'OWNER', sub = null, options = {}, customId = null, channel = null } = {}) {
@@ -52,6 +52,11 @@ const ctxFor = (k, over = {}) => {
   };
 };
 const embed = (p) => p.embeds[0].toJSON();
+/** Run one /sos subcommand. */
+const run = (sub, i, ctx) => {
+  i.options.getSubcommand = () => sub;
+  return sos.execute(i, ctx);
+};
 const fieldOf = (e, name) => (e.fields.find((f) => f.name === name) || {}).value;
 
 test('/sos start: shows a preview with the scan file and two buttons, and changes nothing', async () => {
@@ -244,13 +249,14 @@ test('/sos end that cannot finish says so and keeps SOS on', async () => {
   }
 });
 
-test('/sos is for the owner only, and its definition follows the house format', () => {
+test('/sos start, end, recover and backup are for the owner only, and its definition follows the house format', () => {
   const call = (user) => refusal(commands.get('sos'), { commandName: 'sos', user: { id: user }, guild: { ownerId: 'OWNER' }, inGuild: () => true }, { isManager: (u) => u.id === 'MGR', verifiedGate: () => ({ ok: true }) });
   assert.equal(call('OWNER'), null);
   assert.equal(call('MGR'), null);
   assert.match(call('ADMIN'), /Only the server owner can use \/sos/);
+  assert.equal(commands.has('lock') || commands.has('unlock') || commands.has('ban'), false, 'lock, unlock and ban live under /sos now');
   const json = sos.data.toJSON();
-  assert.deepEqual(json.options.map((o) => o.name), ['start', 'end', 'status']);
+  assert.deepEqual(json.options.map((o) => o.name), ['start', 'end', 'recover', 'backup', 'status', 'lock', 'unlock', 'ban']);
   for (const o of [json, ...json.options]) {
     assert.ok(o.description.length <= 100 && !o.description.endsWith('.'), o.description);
   }
@@ -266,13 +272,13 @@ const lockKit = () => {
 };
 const textChannel = (k, id) => ({ id, type: ChannelType.GuildText, send: async (p) => { k.sent = (k.sent || []).concat(p); } });
 
-test('/lock posts the Channel locked card in the channel, and /unlock puts the channel back as it was', async () => {
+test('/sos lock posts the Channel locked card in the channel, and /sos unlock puts the channel back as it was', async () => {
   const k = lockKit();
   try {
     const original = k.server.dump();
     const { ctx } = ctxFor(k);
     const a = fakeInteraction(k, { user: 'ADMIN1', channel: textChannel(k, 'talk') });
-    await lock.execute(a.i, ctx);
+    await run('lock', a.i, ctx);
     const locked = embed(k.sent[0]);
     assert.equal(locked.title, 'Channel locked');
     assert.equal(locked.description, 'Only admins and the server owner can write here.');
@@ -285,62 +291,275 @@ test('/lock posts the Channel locked card in the channel, and /unlock puts the c
     assert.equal(BigInt(vip.allow) & SEND, 0n, 'a role that was allowed to write is not any more');
 
     const again = fakeInteraction(k, { user: 'ADMIN1', channel: textChannel(k, 'talk') });
-    await lock.execute(again.i, ctx);
+    await run('lock', again.i, ctx);
     assert.match(embed(again.log.replies[0]).description, /already locked/);
 
     const u = fakeInteraction(k, { user: 'ADMIN1', channel: textChannel(k, 'talk') });
-    await unlock.execute(u.i, ctx);
+    await run('unlock', u.i, ctx);
     assert.equal(embed(k.sent[1]).title, 'Channel unlocked');
     assert.deepEqual(k.server.dump(), original);
 
     const notLocked = fakeInteraction(k, { user: 'ADMIN1', channel: textChannel(k, 'talk') });
-    await unlock.execute(notLocked.i, ctx);
-    assert.match(embed(notLocked.log.replies[0]).description, /was not locked with \/lock/);
+    await run('unlock', notLocked.i, ctx);
+    assert.match(embed(notLocked.log.replies[0]).description, /was not locked with \/sos lock/);
   } finally {
     k.done();
   }
 });
 
-test('/lock refuses threads, explains a permission problem and falls back to a private card when it cannot post', async () => {
+test('/sos lock refuses threads, explains a permission problem and falls back to a private card when it cannot post', async () => {
   const k = lockKit();
   try {
     const { ctx, held } = ctxFor(k);
     const thread = fakeInteraction(k, { channel: { id: 't', type: ChannelType.PublicThread } });
-    await lock.execute(thread.i, ctx);
+    await run('lock', thread.i, ctx);
     assert.match(embed(thread.log.replies[0]).description, /not in a thread/);
-    assert.equal(held.refunds, 1);
 
     k.server.failWhen = (m) => (m === 'PUT' ? Object.assign(new Error('Missing Permissions'), { code: 50013 }) : null);
     const denied = fakeInteraction(k, { channel: textChannel(k, 'talk') });
-    await lock.execute(denied.i, ctx);
+    await run('lock', denied.i, ctx);
     assert.match(embed(denied.log.replies[0]).description, /Give me Manage Roles/);
     assert.equal(k.svc.isLocked(G, 'talk'), false);
     k.server.failWhen = null;
 
     const mute = fakeInteraction(k, { channel: { id: 'talk', type: ChannelType.GuildText, send: async () => { throw new Error('Missing Access'); } } });
-    await lock.execute(mute.i, ctx);
+    await run('lock', mute.i, ctx);
     assert.equal(embed(mute.log.replies[0]).title, 'Channel locked', 'the answer still reaches the admin');
   } finally {
     k.done();
   }
 });
 
-test('/lock and /unlock are for admins, and refuse while SOS is on', async () => {
+test('/sos lock and /sos unlock are for admins, and refuse while SOS is on', async () => {
   const k = lockKit();
   try {
-    const callWith = (name, user, perms) =>
-      refusal(commands.get(name), { commandName: name, user: { id: user }, guild: { ownerId: 'OWNER' }, memberPermissions: perms, inGuild: () => true }, { isManager: (u) => u.id === 'MGR', verifiedGate: () => ({ ok: true }) });
-    for (const name of ['lock', 'unlock']) {
-      assert.equal(callWith(name, 'A', { has: (f) => f === ADMIN }), null);
-      assert.equal(callWith(name, 'OWNER', { has: () => false }), null);
-      assert.match(callWith(name, 'MOD', { has: (f) => f === P.ManageMessages }), /Only admins can use/);
+    const callWith = (sub, user, perms) =>
+      refusal(commands.get('sos'), { commandName: 'sos', options: { getSubcommand: () => sub }, user: { id: user }, guild: { ownerId: 'OWNER' }, memberPermissions: perms, inGuild: () => true }, { isManager: (u) => u.id === 'MGR', verifiedGate: () => ({ ok: true }) });
+    for (const sub of ['lock', 'unlock']) {
+      assert.equal(callWith(sub, 'A', { has: (f) => f === ADMIN }), null);
+      assert.equal(callWith(sub, 'OWNER', { has: () => false }), null);
+      assert.match(callWith(sub, 'MOD', { has: (f) => f === P.ManageMessages }), new RegExp(`Only admins can use /sos ${sub}`));
     }
     k.svc._sos()[G] = { active: true };
     const { ctx } = ctxFor(k);
     const x = fakeInteraction(k, { channel: textChannel(k, 'talk') });
-    await lock.execute(x.i, ctx);
+    await run('lock', x.i, ctx);
     assert.match(embed(x.log.replies[0]).description, /SOS is on/);
   } finally {
     k.done();
+  }
+});
+
+// ---------- /sos backup, status and recover ----------
+
+const at = (minutes) => new Date(Date.UTC(2026, 0, 1, 12, 0, 0) + minutes * 60_000);
+const field = (e, name) => (e.fields.find((f) => f.name === name) || {}).value;
+
+/** The server, the services and a context that has all of them. */
+function recoverKit() {
+  const k = kit(typical());
+  const backups = new BackupService({ rest: k.server.rest, config: { dataDir: k.dir, backup: { everyMinutes: 30, keep: 5 } } });
+  const recover = new RecoverService({ storage: k.storage, config: { logs: {}, verified: {}, autoRole: {}, tickets: { notify: {} }, web: {} }, rest: k.server.rest });
+  const c = ctxFor(k, { backups, recover });
+  return { k, backups, recover, ...c };
+}
+const attack = (server) => {
+  server.deleteChannel('vipchat');
+  server.deleteChannel('staff');
+  server.deleteChannel('CAT2');
+  server.deleteRole('MODR');
+  server.deleteRole('VIPR');
+};
+const lastReply = (log) => embed(log.replies[log.replies.length - 1]);
+
+test('/sos backup saves a copy now and sends the file to the owner', async () => {
+  const x = recoverKit();
+  try {
+    const a = fakeInteraction(x.k, { sub: 'backup' });
+    await sos.execute(a.i, x.ctx);
+    const e = lastReply(a.log);
+    assert.equal(e.title, 'Copy saved');
+    assert.deepEqual([field(e, 'Channels'), field(e, 'Roles'), field(e, 'People with roles')], ['7', '7', '6']);
+    assert.match(field(e, 'Sent to you'), /^Yes/);
+    assert.equal(a.log.dms.length, 1);
+    assert.match(a.log.dms[0].files[0].name, /^backup-100-\d{8}-\d{6}\.json$/);
+    const file = JSON.parse(Buffer.from(a.log.dms[0].files[0].attachment).toString());
+    assert.equal(file.kind, '35xw-backup');
+    assert.equal(file.snapshot.channels.length, 7);
+    assert.equal(x.backups.list(G).length, 1);
+
+    // a copy is taken even while copies are paused, and a closed DM is said plainly
+    x.backups.freeze(G);
+    const b = fakeInteraction(x.k, { sub: 'backup' });
+    b.i.user.send = async () => { throw new Error('closed'); };
+    await sos.execute(b.i, x.ctx);
+    assert.match(field(lastReply(b.log), 'Sent to you'), /^No, your DMs are closed/);
+  } finally {
+    x.k.done();
+  }
+});
+
+test('/sos status tells which copies exist and when they are paused', async () => {
+  const x = recoverKit();
+  try {
+    const none = fakeInteraction(x.k, { sub: 'status' });
+    await sos.execute(none.i, x.ctx);
+    assert.equal(lastReply(none.log).title, 'SOS is off');
+    assert.match(field(lastReply(none.log), 'Saved copies'), /None yet/);
+
+    await x.backups.take(x.k.server.guild, { at: at(0) });
+    x.backups.freeze(G);
+    const st = fakeInteraction(x.k, { sub: 'status' });
+    await sos.execute(st.i, x.ctx);
+    assert.match(field(lastReply(st.log), 'Saved copies'), /^2, 1 pinned\. Newest <t:\d+:R>: 7 channels, 7 roles\.$/);
+    assert.match(field(lastReply(st.log), 'Copies paused'), /Somebody deleted/);
+  } finally {
+    x.k.done();
+  }
+});
+
+test('/sos recover: preview first and nothing changes, then the button makes it all again', async () => {
+  const x = recoverKit();
+  try {
+    await x.backups.take(x.k.server.guild, { at: at(0) });
+    attack(x.k.server);
+    const before = x.k.server.dump();
+
+    const a = fakeInteraction(x.k, { sub: 'recover' });
+    await sos.execute(a.i, x.ctx);
+    const p = a.log.replies[0];
+    const e = embed(p);
+    assert.equal(e.title, 'Recover preview');
+    assert.match(e.description, /Nothing has been made yet/);
+    assert.match(field(e, 'Copy'), /^the newest copy, taken <t:\d+:R>: 7 channels, 7 roles\.$/);
+    assert.equal(field(e, 'Roles to make (2)').split('\n').sort().join(','), 'Mod,VIP');
+    assert.match(field(e, 'Channels to make (3)'), /GENERAL/);
+    assert.match(field(e, 'Channels to make (3)'), /vipchat \(in GENERAL\)/);
+    assert.match(field(e, 'Moved back into their category (2)'), /chat/);
+    assert.match(field(e, 'Permissions put back'), /1 permission of the deleted roles on 1 existing channel: voice/);
+    assert.match(field(e, 'Roles given back'), /2 role assignments/);
+    assert.match(field(e, 'Good to know'), /cannot come back/);
+    const [go, no] = p.components[0].toJSON().components.map((c) => c.custom_id);
+    assert.match(go, /^sos:rgo:/);
+    assert.match(no, /^sos:rno:/);
+    assert.deepEqual(x.k.server.dump(), before);
+
+    // a stranger cannot press it, and a non-owner is refused outright
+    const stranger = fakeInteraction(x.k, { customId: go, user: 'SOMEONE' });
+    await sos.handleButton(stranger.i, x.ctx);
+    assert.equal(embed(stranger.log.updates[0]).title, 'Preview expired');
+    const notOwner = fakeInteraction(x.k, { customId: go });
+    await sos.handleButton(notOwner.i, { ...x.ctx, isOwnerOrManager: () => false });
+    assert.match(embed(notOwner.log.replies[0]).description, /Only the server owner can use \/sos/);
+    assert.deepEqual(x.k.server.dump(), before);
+
+    // the button
+    const press = fakeInteraction(x.k, { customId: go });
+    await sos.handleButton(press.i, x.ctx);
+    assert.equal(embed(press.log.updates[0]).title, 'Making deleted channels and roles again');
+    const done = lastReply(press.log);
+    assert.equal(done.title, 'Recovered');
+    assert.deepEqual([field(done, 'Roles made'), field(done, 'Channels made'), field(done, 'Roles given back')], ['2', '3', '2']);
+    assert.equal(field(done, 'Moved into category'), '2');
+    assert.equal(field(done, 'Permissions put back'), '1');
+    assert.equal(x.k.server.channelByName('vipchat').length, 1);
+    assert.equal(x.held.n, 1, 'the log was muted while it ran');
+    assert.equal(x.held.released, 1);
+    assert.equal(x.posted[0].title, 'Recover finished');
+
+    // copies start again, and one is taken straight away
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(x.backups.isFrozen(G), false);
+    assert.equal(x.backups.list(G).length >= 1, true);
+
+    // nothing left to recover
+    const again = fakeInteraction(x.k, { sub: 'recover' });
+    await sos.execute(again.i, x.ctx);
+    assert.equal(lastReply(again.log).title, 'Nothing to recover');
+  } finally {
+    x.k.done();
+  }
+});
+
+test('/sos recover: Cancel makes nothing, and the preview works only once', async () => {
+  const x = recoverKit();
+  try {
+    await x.backups.take(x.k.server.guild, { at: at(0) });
+    x.k.server.deleteChannel('staff');
+    const before = x.k.server.dump();
+    const a = fakeInteraction(x.k, { sub: 'recover' });
+    await sos.execute(a.i, x.ctx);
+    const [go, no] = a.log.replies[0].components[0].toJSON().components.map((c) => c.custom_id);
+    const cancel = fakeInteraction(x.k, { customId: no });
+    await sos.handleButton(cancel.i, x.ctx);
+    assert.deepEqual(embed(cancel.log.updates[0]), { ...embed(cancel.log.updates[0]), title: 'Cancelled', description: 'Nothing was made.' });
+    assert.deepEqual(x.k.server.dump(), before);
+    assert.equal(x.k.server.channelByName('staff').length, 0);
+    const late = fakeInteraction(x.k, { customId: go });
+    await sos.handleButton(late.i, x.ctx);
+    assert.equal(embed(late.log.updates[0]).title, 'Preview expired');
+  } finally {
+    x.k.done();
+  }
+});
+
+test('/sos recover says plainly why it cannot, and refuses while SOS is on', async () => {
+  const x = recoverKit();
+  try {
+    const none = fakeInteraction(x.k, { sub: 'recover' });
+    await sos.execute(none.i, x.ctx);
+    assert.match(lastReply(none.log).description, /no saved copy yet/);
+
+    await x.backups.take(x.k.server.guild, { at: at(0) });
+    const whole = fakeInteraction(x.k, { sub: 'recover' });
+    await sos.execute(whole.i, x.ctx);
+    assert.equal(lastReply(whole.log).title, 'Nothing to recover');
+
+    x.k.server.deleteChannel('staff');
+    const noRights = fakeInteraction(x.k, { sub: 'recover' });
+    const guild = { ...x.k.server.guild, members: { ...x.k.server.guild.members, me: { permissions: { has: () => false } } } };
+    noRights.i.guild = guild;
+    await sos.execute(noRights.i, x.ctx);
+    assert.match(lastReply(noRights.log).description, /Administrator, or Manage Roles and Manage Channels/);
+
+    x.k.svc._sos()[G] = { active: true };
+    const on = fakeInteraction(x.k, { sub: 'recover' });
+    await sos.execute(on.i, x.ctx);
+    assert.match(lastReply(on.log).description, /SOS is on/);
+  } finally {
+    x.k.done();
+  }
+});
+
+test('/sos recover with the copy file from /sos backup works when the bot lost its own copies', async () => {
+  const x = recoverKit();
+  const realFetch = globalThis.fetch;
+  try {
+    const made = await x.backups.take(x.k.server.guild, { at: at(0) });
+    const text = fs.readFileSync(made.file, 'utf8');
+    fs.rmSync(x.backups.dirFor(G), { recursive: true });
+    x.k.server.deleteChannel('staff');
+
+    const bad = async (attachment, text2) => {
+      const a = fakeInteraction(x.k, { sub: 'recover', options: { copy: attachment } });
+      await sos.execute(a.i, x.ctx);
+      assert.match(lastReply(a.log).description, text2);
+    };
+    await bad({ name: 'notes.txt', size: 10, url: 'https://cdn.discordapp.com/a/notes.txt' }, /\.json file I sent you/);
+    await bad({ name: 'b.json', size: 10, url: 'https://evil.example/b.json' }, /only read attachments from Discord/);
+
+    globalThis.fetch = async () => ({ ok: true, text: async () => text.replace('"guildId":"100"', '"guildId":"999"') });
+    await bad({ name: 'b.json', size: 10, url: 'https://cdn.discordapp.com/a/b.json' }, /not a saved copy of this server/);
+
+    globalThis.fetch = async () => ({ ok: true, text: async () => text });
+    const a = fakeInteraction(x.k, { sub: 'recover', options: { copy: { name: 'backup-100.json', size: text.length, url: 'https://cdn.discordapp.com/a/backup-100.json' } } });
+    await sos.execute(a.i, x.ctx);
+    const e = lastReply(a.log);
+    assert.equal(e.title, 'Recover preview');
+    assert.match(field(e, 'Copy'), /^your file, taken/);
+    assert.match(field(e, 'Channels to make (1)'), /staff/);
+  } finally {
+    globalThis.fetch = realFetch;
+    x.k.done();
   }
 });

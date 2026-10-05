@@ -31,6 +31,9 @@ function defaults() {
     // sos.<guildId> = { active, phase, startedAt, startedBy, snapshot, added, stripped, backupFile, failed }
     //   -> the whole server as it was before /sos start. Kept until /sos end has put everything back.
     sos: {},
+    // recovered.<guildId> = { channels: { oldId: newId }, roles: { oldId: newId } } -> what /sos recover made
+    //   again, so the same thing is never made twice and saved ids follow the new ones.
+    recovered: {},
   };
 }
 
@@ -64,6 +67,7 @@ function sanitize(data) {
   if (!isPlainObject(data.setup)) data.setup = {};
   if (!isPlainObject(data.locks)) data.locks = {};
   if (!isPlainObject(data.sos)) data.sos = {};
+  if (!isPlainObject(data.recovered)) data.recovered = {};
   return data;
 }
 

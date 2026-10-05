@@ -35,6 +35,8 @@ class AntiNukeService {
     this.recent = new Map();
     /** "guildId:userId" -> true while that person is being dealt with (one ban per burst) */
     this.acted = new Set();
+    /** called as (guild, userId) at the first channel or role deletion by somebody who is not exempt */
+    this.onSuspect = null;
   }
 
   // ---- who is exempt, what counts ----
@@ -69,9 +71,19 @@ class AntiNukeService {
   }
 
   async onAudit(entry, guild) {
-    if (entry.action !== AuditLogEvent.ChannelDelete) return null;
+    const isChannel = entry.action === AuditLogEvent.ChannelDelete;
+    if (!isChannel && entry.action !== AuditLogEvent.RoleDelete) return null;
     if (this.isExempt(guild, entry.executorId)) return null;
     const userId = entry.executorId;
+    // The first deletion is enough to keep the last good copy of the server safe (only channels get banned).
+    if (typeof this.onSuspect === 'function') {
+      try {
+        this.onSuspect(guild, userId);
+      } catch (err) {
+        console.warn(`[35xw] anti-nuke: suspect handler failed: ${err.message}`);
+      }
+    }
+    if (!isChannel) return null;
     const count = this.record(guild.id, userId, entry.createdTimestamp || Date.now());
     if (count < this.rule.banAt) return null;
 
@@ -169,7 +181,12 @@ class AntiNukeService {
       description: banned
         ? `${who} deleted ${plural(count, 'channel')} within ${plural(this.minutes(), 'minute')} and was banned.`
         : `${who} deleted ${plural(count, 'channel')} within ${plural(this.minutes(), 'minute')}, but the ban failed: ${error}.\nMove my role above theirs and give me Ban Members.`,
-      fields: [field('Warned by DM', warned ? 'Yes' : 'No (DMs closed)', true), field('Server told', announced ? 'Yes' : 'No', true), field('Server', guild.name, true)],
+      fields: [
+        field('Warned by DM', warned ? 'Yes' : 'No (DMs closed)', true),
+        field('Server told', announced ? 'Yes' : 'No', true),
+        field('Server', guild.name, true),
+        field('Next step', 'Run `/sos recover` to make deleted channels and roles again from the saved copy.'),
+      ],
       tone: banned ? 'warn' : 'danger',
       footer: false,
       timestamp: true,

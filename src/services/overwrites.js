@@ -142,8 +142,30 @@ async function takeSnapshot(rest, guild) {
     guildName: guild.name,
     ownerId: guild.ownerId,
     takenAt: new Date().toISOString(),
-    channels: channels.map((c) => ({ id: c.id, name: c.name, type: c.type, parentId: c.parent_id || null, position: c.position || 0, overwrites: overwritesOf(c) })),
-    roles: roles.map((r) => ({ id: r.id, name: r.name, permissions: String(big(r.permissions)), managed: !!r.managed, position: r.position || 0 })),
+    // Everything needed to make a channel or a role again, not only its permissions.
+    channels: channels.map((c) => ({
+      id: c.id,
+      name: c.name,
+      type: c.type,
+      parentId: c.parent_id || null,
+      position: c.position || 0,
+      topic: c.topic || null,
+      nsfw: !!c.nsfw,
+      rateLimit: c.rate_limit_per_user || 0,
+      bitrate: c.bitrate || null,
+      userLimit: c.user_limit || 0,
+      overwrites: overwritesOf(c),
+    })),
+    roles: roles.map((r) => ({
+      id: r.id,
+      name: r.name,
+      permissions: String(big(r.permissions)),
+      managed: !!r.managed,
+      position: r.position || 0,
+      color: r.color || 0,
+      hoist: !!r.hoist,
+      mentionable: !!r.mentionable,
+    })),
   };
 }
 

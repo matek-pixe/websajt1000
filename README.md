@@ -1,9 +1,9 @@
 # 35xw – Discord bot
 
-A Discord bot for a verified community server: a **ticket system** with HTML transcripts, a one-command
-an **anti-nuke** guard, **/lock** and the **/sos** emergency button, a **server log**, an **auto
-role** on join with **role memory** (members keep their roles after they leave), a **/stats** card, and an optional
-Discord-gated **website**.
+A Discord bot for a verified community server: a **ticket system** with HTML transcripts, an **anti-nuke**
+guard, one **/sos** command for every emergency (hide the server, recover what was deleted, lock, ban), a
+**server log**, an **auto role** on join with **role memory** (members keep their roles after they leave), a
+**/stats** card, and an optional Discord-gated **website**.
 
 ---
 
@@ -12,10 +12,11 @@ Discord-gated **website**.
 | Command | Who | What it does |
 | --- | --- | --- |
 | `/stats` | **verified** | Shows the server: **members** (people, bots, verified), the **boost level** with the boosts and how many more the next level needs, open tickets, channels, roles, emoji and stickers, when the server was made and who owns it. |
-| `/lock` | **admins** | Locks the channel it is written in: only admins and the server owner can write there, everyone else cannot. Posts a **Channel locked** card. |
-| `/unlock` | **admins** | Opens a channel locked with `/lock` and puts its permissions back exactly as they were. |
-| `/sos start` · `/sos end` · `/sos status` | **server owner** | Emergency button. `start` saves the whole server, then hides every channel from everyone except the owner. `end` puts every channel and role back exactly as it was and proves it. See *Lock and SOS* below. |
-| `/ban user [reason]` | **admins** | Bans a member (or a user id that already left) and writes the reason, with the admin's name, into the audit log. The target must sit below the admin and the bot in the role list. |
+| `/sos start` · `/sos end` | **server owner** | Emergency button. `start` saves the whole server, then hides every channel from everyone except the owner. `end` puts every channel and role back exactly as it was and proves it. See *Lock and SOS* below. |
+| `/sos recover` | **server owner** | After an attack: makes the deleted **channels and roles again** from the saved copy, with their permissions, and gives the roles back to everyone who had them. Shows a preview first. See *Backup and recover* below. |
+| `/sos backup` · `/sos status` | **server owner** | `backup` saves a copy of every channel and role now and sends the file to you. `status` shows whether SOS is on and which copies exist. |
+| `/sos lock` · `/sos unlock` | **admins** | `lock` locks the channel it is written in: only admins and the server owner can write there. `unlock` opens it again and puts its permissions back exactly as they were. |
+| `/sos ban user [reason]` | **admins** | Bans a member (or a user id that already left) and writes the reason, with the admin's name, into the audit log. The target must sit below the admin and the bot in the role list. |
 | `/b [user] [mode]` | **manager only** | Bypass: exempt from every limit (command cooldowns, one-open-ticket rule, ticket cooldown). `/b` toggles your own; `/b user:@someone` gives it to (or takes it from) that person; `mode:on/off` sets it explicitly; `mode:List` shows who has it. Persisted across restarts. |
 | `/v [staff]` | **staff** | Posts the **35xw verification** panel with a 🎫 **OPEN TICKET** button. Optionally sets the staff role. |
 | `/close` | opener / staff | Closes the current ticket: saves the HTML transcript, then deletes the channel. |
@@ -24,8 +25,8 @@ Discord-gated **website**.
 - **verified** = members holding the VERIFIED role (`VERIFIED_ROLE_ID`, the role staff hands out after a ticket).
   The manager, people with bypass, the server owner and admins always pass. On a server where no VERIFIED role
   is known (the id does not exist there) those commands stay open to everyone.
-- **server owner** commands (`/sos`) also work for the manager, but for no admin.
-- Every command has a **30‑second cooldown per user** (configurable via `COOLDOWN_SECONDS`).
+- **server owner** commands (`/sos start`, `end`, `recover`, `backup`, `status`) also work for the manager, but for no admin. `/sos lock`, `unlock` and `ban` are the only parts of `/sos` that admins may use.
+- Every command has a **30‑second cooldown per user** (configurable via `COOLDOWN_SECONDS`), except `/sos`, an emergency tool never waits.
 - The **manager** is the only person allowed to hand out bypass. The manager is
   identified by their Discord **user ID** (`1143659003327553556`, username `35bf`), which cannot
   be spoofed by changing a nickname.
@@ -110,13 +111,13 @@ stored per server, so each server starts at `ticket-0001` and never interferes w
 
 ### Lock and SOS
 
-Both change permissions straight through Discord's API, on the raw numbers, and both save the original first,
+`/sos lock` and `/sos start` change permissions straight through Discord's API, on the raw numbers, and both save the original first,
 so putting it back is exact to the bit.
 
-**`/lock`** denies writing (messages, messages in threads, new threads) for everyone in the channel it is run in.
+**`/sos lock`** denies writing (messages, messages in threads, new threads) for everyone in the channel it is run in.
 Admins and the server owner write regardless (Administrator ignores overwrites). Roles that had an explicit
 "may write" lose it too. The bot keeps its own access so it can answer. The channel's old overwrites are saved;
-`/unlock` writes exactly those back. A second `/lock` never replaces the saved copy, and a failed lock is
+`/sos unlock` writes exactly those back. A second `/sos lock` never replaces the saved copy, and a failed lock is
 rolled back.
 
 **`/sos start`** (owner only) does this, in this order:
@@ -145,6 +146,41 @@ Good to know: channels created while SOS is on are not covered; people sitting i
 disconnected; Community servers may refuse to hide their rules and updates channels; permission edits made by
 others while SOS is on are reverted by `/sos end`. The server log is muted for the run and gets one line at the
 start and one at the end. The bot needs **Administrator**, or **Manage Roles** and **Manage Channels**.
+
+### Backup and recover
+
+The bot keeps **saved copies of the server's structure**: every channel (name, topic, category, slowmode,
+voice settings and **all its permissions**), every role (name, colour, permissions, hoist) and **who holds which
+role**. They are written to `data/backups/<server>/`.
+
+- A copy is taken at start, **every 30 minutes** (`BACKUP_EVERY_MINUTES`), and a couple of minutes after a
+  channel or role is made or changed, never after one is deleted. The newest 12 are kept (`BACKUP_KEEP`).
+- **The good copy cannot be pushed out.** The moment somebody who is not allowed to (not the owner, the manager,
+  the bot or `ANTINUKE_TRUSTED_IDS`) deletes a channel or a role, the newest copy is pinned as an *incident* copy
+  and new copies stop for an hour. A copy that has lost a channel or role the one before it still had does the
+  same for the one before, so an attack nobody noticed cannot rotate every good copy away.
+- `/sos backup` takes a copy now and **sends you the file** by DM, a copy outside the server and outside the
+  bot's disk. Give it back with `/sos recover copy:<file>` if the bot ever lost its own.
+
+**`/sos recover`** (owner only):
+1. **Preview.** It picks the pinned copy from before the attack (else the newest one), compares it with the server
+   as it is now and lists what is missing: roles, channels, the permissions the deleted roles lost on channels
+   that still exist, channels that lost their category, and how many roles will be given back. Nothing is changed.
+2. **Recover**, only when the owner presses the button. Then, in this order: the **roles** (same name, colour and
+   permissions), the **channels**, categories first (same settings, **same permissions, pointing at the new
+   roles**, inside the same category), the channels that were left without a category go back into it, the
+   permissions of the deleted roles come back on the channels that still exist, and finally everybody who had a
+   deleted role **gets it back**.
+3. **Safe to repeat.** Only what is missing is made; nothing that exists is changed. A role or channel somebody
+   already made again by hand (same name) is linked, not made twice. The new ids are remembered, so a second run
+   makes nothing, and the ids the bot saved (auto role, ticket staff role and category, verify channel, log and
+   staff channel, website roles) follow the new ones, also after a restart.
+4. Afterwards copies start again and one is taken at once.
+
+Good to know: **messages from a deleted channel cannot come back**, Discord does not keep them. New channels and
+roles have **new ids** and a new role starts at the **bottom of the role list**, so move it up where it belongs.
+People, bans and messages are never touched. The bot needs **Administrator**, or **Manage Roles** and **Manage
+Channels**.
 
 ### Online transcripts
 
@@ -218,6 +254,7 @@ Ban Members). The private message and the alert never hold the ban back for more
 - There is no command and no switch. At every start the bot checks that it has **Ban Members** and
   **View Audit Log**, and says so in the log channel if not.
 - Settings: `ANTINUKE_BAN_AT` (2) and `ANTINUKE_WINDOW_MINUTES` (10).
+- The first channel or role somebody deletes also pins the last good saved copy, and the owner report says to run `/sos recover`.
 - A staff member who really needs to delete channels should be added to `ANTINUKE_TRUSTED_IDS`. Other bots
   count too, so a bot that cleans up many channels needs the same.
 - A banned member's remembered roles are cleared, so rejoining after an unban starts clean.
@@ -307,8 +344,8 @@ need to set the start command and hit start.
 
 All state lives in `DATA_DIR` (default `./data`):
 
-- `db.json` – tickets, role memory, settings and the saved copies of `/lock` and `/sos`.
-- `sos/` – the backup file of every `/sos start`, and `transcripts/` when the own website hosts them.
+- `db.json` – tickets, role memory, settings, the saved copies of `/sos lock` and `/sos start`, and the ids `/sos recover` made again.
+- `sos/` – the backup file of every `/sos start`; `backups/` – the saved copies of every server's channels and roles (`/sos recover`); `transcripts/` when the own website hosts them.
 
 When the bot starts it prints `Data: … (loaded)` or `(new, nothing was saved before)`. If it says
 **new** after a restart, the host is not keeping the data folder, and tickets and remembered roles
@@ -339,15 +376,16 @@ src/
     cooldown.js          # per-user command cooldowns
     roleMemory.js        # auto role + remembered roles
     antinuke.js          # bans anyone who deletes too many channels
-    overwrites.js        # exact permission maths for /lock and /sos
-    lockdown.js          # /lock and /sos: save, apply, restore, verify
+    overwrites.js        # exact permission maths for /sos
+    lockdown.js          # /sos start, end, lock, unlock: save, apply, restore, verify
+    backups.js           # saved copies of every channel and role
+    recover.js           # /sos recover: make deleted channels and roles again
     transcriptHtml.js    # the transcript page
     transcriptMedia.js   # downloads the pictures into it
     transcriptHost.js    # puts it online (R2 or the own website)
   commands/
     stats.js             # /stats (members, boost level, more)
-    ban.js               # /ban (admins, with a reason)
-    lock.js unlock.js    # /lock  /unlock
-    sos.js               # /sos start | end | status
+    sos.js               # /sos start | end | recover | backup | status | lock | unlock | ban
+    _lock.js _ban.js     # what /sos lock, unlock and ban do
 test/                    # unit tests
 ```

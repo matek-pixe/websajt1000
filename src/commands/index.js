@@ -5,9 +5,6 @@ const { Collection } = require('discord.js');
 const modules = [
   require('./bypass'),
   require('./stats'),
-  require('./ban'),
-  require('./lock'),
-  require('./unlock'),
   require('./sos'),
   // ticket system
   require('./verify'),

@@ -212,3 +212,35 @@ test('it is always on: there is no command and no switch', () => {
   assert.equal(t.svc.isOn, undefined);
   assert.equal(t.svc.set, undefined);
 });
+
+test('the first channel or role deleted by somebody who is not exempt keeps the last good copy, once per deletion', async () => {
+  const t = mk();
+  const seen = [];
+  t.svc.onSuspect = (g, id) => seen.push([g.id, id]);
+  await t.svc.onAudit({ action: A.RoleDelete, executorId: 'BAD', createdTimestamp: Date.now() }, t.guild);
+  assert.deepEqual(seen, [['G', 'BAD']], 'a deleted role counts as a warning sign');
+  assert.equal(t.bans.length, 0, 'but only deleted channels get somebody banned');
+  await t.del('BAD');
+  assert.equal(seen.length, 2);
+
+  // the owner, the manager, this bot and trusted ids never set it off
+  for (const id of ['OWN', 'MGR', 'BOT', 'TRUST']) await t.del(id);
+  await t.svc.onAudit({ action: A.RoleDelete, executorId: 'OWN', createdTimestamp: Date.now() }, t.guild);
+  assert.equal(seen.length, 2);
+
+  // other actions never do
+  await t.svc.onAudit({ action: A.ChannelCreate, executorId: 'BAD', createdTimestamp: Date.now() }, t.guild);
+  assert.equal(seen.length, 2);
+});
+
+test('a failing suspect handler never stops the ban, and the owner report points at /sos recover', async () => {
+  const t = mk();
+  t.svc.onSuspect = () => {
+    throw new Error('disk full');
+  };
+  await t.del('BAD');
+  const r = await t.del('BAD');
+  assert.equal(r.banned, true);
+  const e = t.posted[0].toJSON();
+  assert.match(e.fields.find((f) => f.name === 'Next step').value, /\/sos recover/);
+});

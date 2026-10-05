@@ -72,6 +72,12 @@ const config = {
     trustedIds: listOf(env.ANTINUKE_TRUSTED_IDS),
   },
 
+  // Saved copies of every channel and role, so /sos recover can make deleted ones again.
+  backup: {
+    everyMinutes: positiveNumber(env.BACKUP_EVERY_MINUTES, 30),
+    keep: Math.max(2, Math.floor(positiveNumber(env.BACKUP_KEEP, 12))),
+  },
+
   // Members with this role count as verified (the role staff hands out after a ticket).
   verified: {
     roleId: (env.VERIFIED_ROLE_ID || env.SETUP_VERIFIED_ROLE_ID || '1545185363327193228').trim(),

@@ -53,6 +53,6 @@ test('commands without special rules pass for anyone in a server', () => {
 });
 
 test('admin commands are marked for the command log', () => {
-  for (const name of ['v', 'ban', 'lock', 'unlock', 'sos']) assert.equal(commands.get(name).audit, true, name);
+  for (const name of ['v', 'sos']) assert.equal(commands.get(name).audit, true, name);
   for (const name of ['b', 'sos']) assert.ok(commands.get(name).managerOnly || commands.get(name).ownerOnly, name);
 });

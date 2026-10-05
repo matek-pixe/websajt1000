@@ -37,10 +37,19 @@ function makeServer({ roles, channels, members, ownerId = 'OWNER', botId = 'BOT'
       }
       throw new Error(`unexpected GET ${route}`);
     },
-    async put(route, { body }) {
-      const m = /^\/channels\/(\w+)\/permissions\/(\w+)$/.exec(route);
+    async put(route, { body } = {}) {
       calls.push(['PUT', route, body]);
       if (server.failWhen) { const e = server.failWhen('PUT', route, body); if (e) throw e; }
+      const gm = /^\/guilds\/\w+\/members\/(\w+)\/roles\/(\w+)$/.exec(route);
+      if (gm) {
+        const mem = state.members.get(gm[1]);
+        if (!mem) throw err(10007);
+        if (!state.roles.has(gm[2])) throw err(10011);
+        mem.roles = [...new Set([...(mem.roles || []), gm[2]])];
+        server.guild.members.cache.get(gm[1]).roles.cache.set(gm[2], {});
+        return;
+      }
+      const m = /^\/channels\/(\w+)\/permissions\/(\w+)$/.exec(route);
       const ch = state.channels.get(m[1]);
       if (!ch) throw err(10003);
       if (body.type === 0 && !state.roles.has(m[2])) throw err(10011);
@@ -59,13 +68,47 @@ function makeServer({ roles, channels, members, ownerId = 'OWNER', botId = 'BOT'
       ch.permission_overwrites = ch.permission_overwrites.filter((o) => o.id !== m[2]);
     },
     async patch(route, { body }) {
-      const m = /^\/guilds\/\w+\/roles\/(\w+)$/.exec(route);
       calls.push(['PATCH', route, body]);
       if (server.failWhen) { const e = server.failWhen('PATCH', route, body); if (e) throw e; }
+      const cm = /^\/channels\/(\w+)$/.exec(route);
+      if (cm) {
+        const ch = state.channels.get(cm[1]);
+        if (!ch) throw err(10003);
+        if (body.parent_id && !state.channels.has(body.parent_id)) throw err(50035, 'Invalid parent');
+        if ('parent_id' in body) ch.parent_id = body.parent_id;
+        return;
+      }
+      const m = /^\/guilds\/\w+\/roles\/(\w+)$/.exec(route);
       if (!state.roles.has(m[1])) throw err(10011);
       state.roles.get(m[1]).permissions = BigInt(body.permissions);
     },
+    async post(route, { body }) {
+      calls.push(['POST', route, body]);
+      if (server.failWhen) { const e = server.failWhen('POST', route, body); if (e) throw e; }
+      if (route === `/guilds/${G}/roles`) {
+        const id = `NR${++server.made}`;
+        state.roles.set(id, { id, name: body.name, managed: false, position: 1, color: body.color || 0, hoist: !!body.hoist, mentionable: !!body.mentionable, permissions: BigInt(body.permissions || 0) });
+        return { id, name: body.name };
+      }
+      if (route === `/guilds/${G}/channels`) {
+        if (body.parent_id && !state.channels.has(body.parent_id)) throw err(50035, 'Invalid parent');
+        for (const o of body.permission_overwrites || []) {
+          if (o.type === 0 && !state.roles.has(o.id)) throw err(10011);
+          if (o.type === 1 && !state.members.has(o.id)) throw err(10013);
+        }
+        const id = `NC${++server.made}`;
+        state.channels.set(id, {
+          id, type: body.type ?? 0, name: body.name, position: body.position || 0, parent_id: body.parent_id || null,
+          topic: body.topic || null, nsfw: !!body.nsfw, rate_limit_per_user: body.rate_limit_per_user || 0,
+          bitrate: body.bitrate, user_limit: body.user_limit || 0,
+          permission_overwrites: (body.permission_overwrites || []).map((o) => ({ id: o.id, type: o.type, allow: String(o.allow), deny: String(o.deny) })),
+        });
+        return { id, name: body.name };
+      }
+      throw new Error(`unexpected POST ${route}`);
+    },
   };
+  server.made = 0;
 
   const botMember = state.members.get(botId);
   const botPerms = () => [...(botMember.roles || [])].reduce((a, id) => a | (state.roles.get(id) ? state.roles.get(id).permissions : 0n), 0n);
@@ -75,7 +118,7 @@ function makeServer({ roles, channels, members, ownerId = 'OWNER', botId = 'BOT'
     name: 'Test Server',
     ownerId,
     members: {
-      cache: new Map([...state.members.keys()].map((id) => [id, {}])),
+      cache: new Map([...state.members.values()].map((m) => [m.id, { id: m.id, user: { bot: !!m.bot }, roles: { cache: new Map((m.roles || []).map((id) => [id, {}])) } }])),
       fetch: async (id) => (state.members.has(id) ? {} : null),
       fetchMe: async () => server.guild.members.me,
       me: {
@@ -85,6 +128,25 @@ function makeServer({ roles, channels, members, ownerId = 'OWNER', botId = 'BOT'
       },
     },
   };
+
+  /** An attacker deletes a channel or a role (a deleted role leaves every member and every overwrite). */
+  server.deleteChannel = (id) => {
+    state.channels.delete(id);
+    for (const ch of state.channels.values()) if (ch.parent_id === id) ch.parent_id = null; // a deleted category frees its channels
+  };
+  server.deleteRole = (id) => {
+    state.roles.delete(id);
+    for (const mem of state.members.values()) mem.roles = (mem.roles || []).filter((r) => r !== id);
+    for (const c of state.members.keys()) server.guild.members.cache.get(c).roles.cache.delete(id);
+    for (const ch of state.channels.values()) ch.permission_overwrites = ch.permission_overwrites.filter((o) => o.id !== id);
+  };
+  /** Somebody leaves the server. */
+  server.removeMember = (id) => {
+    state.members.delete(id);
+    server.guild.members.cache.delete(id);
+  };
+  server.channelByName = (name) => [...state.channels.values()].filter((c) => c.name === name);
+  server.roleByName = (name) => [...state.roles.values()].filter((r) => r.name === name);
 
   /** What the server looks like now, in a form two states can be compared in. */
   server.dump = () => ({

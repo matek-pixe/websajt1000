@@ -13,6 +13,8 @@ const { card, deny, lines, COPY } = require('./ui');
 const { LogService } = require('./services/logs');
 const { AntiNukeService } = require('./services/antinuke');
 const { LockdownService } = require('./services/lockdown');
+const { BackupService } = require('./services/backups');
+const { RecoverService, applyRecovered } = require('./services/recover');
 const { refusal, isOwnerOrManager: ownerOrManager } = require('./gates');
 const { Cooldown } = require('./services/cooldown');
 const { createWebServer } = require('./web/server');
@@ -30,6 +32,7 @@ if (!config.clientId) fail('CLIENT_ID is missing. Set it in .env.');
 
 // ---- services ----
 const storage = new Storage(path.join(config.dataDir, 'db.json'));
+applyRecovered(config, storage); // ids of what /sos recover made again replace the old ones in the settings
 const roleMemory = new RoleMemoryService(storage, config.autoRole);
 const tickets = new TicketService(storage, config);
 const bypass = new BypassService(storage, config);
@@ -192,12 +195,22 @@ logs.attach();
 tickets.onProblem = (guild, text, title) =>
   logs.post(guild, card({ title: title || 'Ticket alert failed', description: text, tone: 'danger', footer: 'tickets', timestamp: true }));
 
-// /lock, /unlock and /sos write permissions straight to the API, so the saved copies are bit for bit exact.
+// /sos lock, unlock and start write permissions straight to the API, so the saved copies are bit for bit exact.
 const lockdown = new LockdownService({ storage, config, rest: client.rest });
 services.lockdown = lockdown;
 
+// Saved copies of every channel and role, and /sos recover that makes deleted ones again from them.
+const backups = new BackupService({ rest: client.rest, config });
+services.backups = backups;
+services.recover = new RecoverService({ storage, config, rest: client.rest });
+
 const antiNuke = new AntiNukeService({ client, storage, config, logs });
 services.antiNuke = antiNuke;
+// The first channel or role deleted by somebody who should not: keep the last good copy and stop new ones.
+antiNuke.onSuspect = (guild, userId) => {
+  const pinned = backups.freeze(guild.id);
+  if (pinned) console.warn(`[35xw] ${guild.name}: ${userId} deleted something, kept the copy from ${pinned.takenAt} for /sos recover.`);
+};
 antiNuke.attach();
 
 client.once(Events.ClientReady, async (c) => {
@@ -228,6 +241,8 @@ client.once(Events.ClientReady, async (c) => {
       console.warn(`[35xw] ${guild.name}: ready sync failed: ${err.message}`);
     }
   }
+  // Copies of the server start once the members are known, because each copy also saves who holds which role.
+  backups.start(c);
   let logged = 0;
   for (const guild of c.guilds.cache.values()) if (logs.announce(guild)) logged += 1;
   // The anti-nuke needs to ban and to read the audit log; say so at once if it cannot.

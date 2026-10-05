@@ -15,6 +15,7 @@ test('fresh storage returns the empty defaults', () => {
     assert.deepEqual(s.data.tickets, {});
     assert.deepEqual(s.data.locks, {});
     assert.deepEqual(s.data.sos, {});
+    assert.deepEqual(s.data.recovered, {});
     assert.deepEqual(s.data.settings, { bypass: false, bypassUsers: {} });
   } finally {
     rm(dir);
@@ -77,4 +78,24 @@ test('fresh tells a new database from a loaded one', () => {
   } finally {
     rm(dir);
   }
+});
+
+test('an old database gets the recovered map, and a hand-edited one is repaired', () => {
+  const dir = tmpDir();
+  try {
+    const file = path.join(dir, 'db.json');
+    fs.writeFileSync(file, JSON.stringify({ version: 1, roles: {}, recovered: 'oops' }));
+    assert.deepEqual(new Storage(file).data.recovered, {});
+    fs.writeFileSync(file, JSON.stringify({ version: 1, roles: {} }));
+    assert.deepEqual(new Storage(file).data.recovered, {});
+  } finally {
+    rm(dir);
+  }
+});
+
+test('config: copies every 30 minutes and keeps 12 by default, and bad values fall back', () => {
+  const run = (env) => JSON.parse(require('node:child_process').execFileSync(process.execPath, ['-e', "process.stdout.write(JSON.stringify(require('./src/config').backup))"], { cwd: path.join(__dirname, '..'), env: { PATH: process.env.PATH, ...env }, encoding: 'utf8' }));
+  assert.deepEqual(run({}), { everyMinutes: 30, keep: 12 });
+  assert.deepEqual(run({ BACKUP_EVERY_MINUTES: '10', BACKUP_KEEP: '24' }), { everyMinutes: 10, keep: 24 });
+  assert.deepEqual(run({ BACKUP_EVERY_MINUTES: 'abc', BACKUP_KEEP: '0' }), { everyMinutes: 30, keep: 12 });
 });
